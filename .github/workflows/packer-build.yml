@@ -35,6 +35,7 @@ jobs:
 
       - name: Authenticate to Google Cloud
         if: github.event.client_payload.platform == 'gcp'
+        id: gcp_auth
         uses: 'google-github-actions/auth@v2'
         with:
           credentials_json: ${{ steps.gcp_creds.outputs.gcp_credentials_json || github.event.client_payload.gcp_credentials_json }}
@@ -69,8 +70,6 @@ jobs:
           creds: '{"clientId":"${{ github.event.client_payload.azure_client_id }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ github.event.client_payload.azure_subscription_id }}","tenantId":"${{ github.event.client_payload.azure_tenant_id }}"}'
 
       - name: 'Build Packer Image'
-        env:
-          PKR_VAR_gcp_project_id: ${{ github.event.client_payload.gcp_project_id }}
         run: |
           export BUILD_ID="${{ github.run_id }}"
           export PLATFORM="${{ github.event.client_payload.platform }}"
@@ -83,7 +82,14 @@ jobs:
 
           packer init "$TEMPLATE_FILE"
           
-          if [ "$PLATFORM" == "azure" ]; then
+          if [ "$PLATFORM" == "gcp" ]; then
+            export PKR_VAR_gcp_project_id="${{ steps.gcp_auth.outputs.project_id }}"
+            packer build \
+              -var "build_id=$BUILD_ID" \
+              -var "platform=$PLATFORM" \
+              -var "vm_size=${{ github.event.client_payload.vm_size }}" \
+              "$TEMPLATE_FILE"
+          elif [ "$PLATFORM" == "azure" ]; then
             packer build \
               -var "build_id=$BUILD_ID" \
               -var "platform=$PLATFORM" \
