@@ -20,12 +20,24 @@ jobs:
       - name: Setup Packer
         uses: hashicorp/setup-packer@main
 
+      - name: 'Load GCP Service Account Key'
+        if: github.event.client_payload.platform == 'gcp' && github.event.client_payload.gcp_key_path
+        id: gcp_creds
+        run: |
+          echo "Loading credentials from ${{ github.event.client_payload.gcp_key_path }}"
+          # The output is multiline, so we need special handling for GHA
+          # See: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#multiline-strings
+          {
+            echo 'gcp_credentials_json<<EOF'
+            cat "${{ github.event.client_payload.gcp_key_path }}"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
       - name: Authenticate to Google Cloud
         if: github.event.client_payload.platform == 'gcp'
         uses: 'google-github-actions/auth@v2'
         with:
-          credentials_json_path: ${{ github.event.client_payload.gcp_key_path }}
-          credentials_json: ${{ github.event.client_payload.gcp_credentials_json }}
+          credentials_json: ${{ steps.gcp_creds.outputs.gcp_credentials_json || github.event.client_payload.gcp_credentials_json }}
 
       - name: Configure AWS Credentials for IAM Role
         if: github.event.client_payload.platform == 'aws' && github.event.client_payload.aws_role_arn
