@@ -1,0 +1,131 @@
+name: Manage Instance State
+
+on:
+  repository_dispatch:
+    types: [manage-instance]
+
+permissions:
+  id-token: write # Required for cloud OIDC.
+  contents: write # Required to remove instance files.
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.client_payload.branch }}
+
+      - name: 'Debug: Show Webhook Payload'
+        run: |
+          echo "Action: ${{ github.event.client_payload.action }}"
+          echo "Instance: ${{ github.event.client_payload.instance_name }}"
+          echo "Platform: ${{ github.event.client_payload.platform }}"
+          echo "Region/Zone: ${{ github.event.client_payload.region }}"
+          echo "Terraform Dir: ${{ github.event.client_payload.terraform_directory }}"
+
+      # --- Cloud Authentication ---
+      - name: 'Load GCP Service Account Key'
+        if: github.event.client_payload.platform == 'gcp' && github.event.client_payload.gcp_key_path
+        id: gcp_creds
+        run: |
+          echo "Loading credentials from ${{ github.event.client_payload.gcp_key_path }}"
+          {
+            echo 'gcp_credentials_json<<EOF'
+            cat "${{ github.event.client_payload.gcp_key_path }}"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        if: github.event.client_payload.platform == 'gcp'
+        id: gcp_auth
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: ${{ steps.gcp_creds.outputs.gcp_credentials_json || github.event.client_payload.gcp_credentials_json }}
+
+      - name: Configure AWS Credentials for IAM Role
+        if: github.event.client_payload.platform == 'aws' && github.event.client_payload.aws_role_arn
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ github.event.client_payload.aws_role_arn }}
+          aws-region: ${{ github.event.client_payload.region || 'us-east-1' }}
+
+      - name: Configure AWS Credentials for Access Keys
+        if: github.event.client_payload.platform == 'aws' && !github.event.client_payload.aws_role_arn
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.client_payload.region || 'us-east-1' }}
+
+      - name: Azure Login with OIDC
+        if: github.event.client_payload.platform == 'azure' && github.event.client_payload.azure_auth_type == 'oidc'
+        uses: azure/login@v1
+        with:
+          client-id: ${{ github.event.client_payload.azure_client_id }}
+          tenant-id: ${{ github.event.client_payload.azure_tenant_id }}
+          subscription-id: ${{ github.event.client_payload.azure_subscription_id }}
+
+      - name: Azure Login with Client Secret
+        if: github.event.client_payload.platform == 'azure' && github.event.client_payload.azure_auth_type != 'oidc'
+        uses: azure/login@v1
+        with:
+          creds: '{"clientId":"${{ github.event.client_payload.azure_client_id }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ github.event.client_payload.azure_subscription_id }}","tenantId":"${{ github.event.client_payload.azure_tenant_id }}"}'
+
+      # --- Terraform Action (for delete) ---
+      - name: Setup Terraform
+        if: github.event.client_payload.action == 'delete'
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Destroy
+        if: github.event.client_payload.action == 'delete'
+        id: destroy
+        run: |
+          TF_DIR="${{ github.event.client_payload.terraform_directory }}"
+          if [ -d "$TF_DIR" ]; then
+            terraform -chdir=$TF_DIR init
+            terraform -chdir=$TF_DIR destroy -auto-approve -no-color
+          else
+            echo "Terraform directory not found, skipping destroy."
+          fi
+
+      - name: Remove Instance Files from Repo
+        if: steps.destroy.outcome == 'success' && github.event.client_payload.action == 'delete'
+        run: |
+          TF_DIR="${{ github.event.client_payload.terraform_directory }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git rm -r -f "$TF_DIR"
+          git commit -m "ci: Destroy instance ${{ github.event.client_payload.instance_name }} and remove configuration"
+          git push
+
+      # --- Cloud CLI Actions (for start/stop) ---
+      - name: Start/Stop GCP Instance
+        if: github.event.client_payload.platform == 'gcp' && github.event.client_payload.action != 'delete'
+        run: |
+          gcloud compute instances ${{ github.event.client_payload.action }} ${{ github.event.client_payload.instance_name }} \
+            --project=${{ steps.gcp_auth.outputs.project_id }} \
+            --zone=${{ github.event.client_payload.region }}-a \
+            --quiet
+
+      - name: Start/Stop AWS EC2 Instance
+        if: github.event.client_payload.platform == 'aws' && github.event.client_payload.action != 'delete'
+        run: |
+          INSTANCE_IDS=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=${{ github.event.client_payload.instance_name }}" "Name=instance-state-name,Values=pending,running,shutting-down,stopped,stopping" --query 'Reservations[].Instances[].InstanceId' --output text)
+          if [ -z "$INSTANCE_IDS" ]; then
+            echo "Instance named '${{ github.event.client_payload.instance_name }}' not found."
+            exit 1
+          fi
+          ACTION="${{ github.event.client_payload.action }}"
+          aws ec2 ${ACTION}-instances --instance-ids $INSTANCE_IDS
+
+      - name: Start/Stop Azure VM
+        if: github.event.client_payload.platform == 'azure' && github.event.client_payload.action != 'delete'
+        run: |
+          ACTION="${{ github.event.client_payload.action }}"
+          if [ "$ACTION" == "start" ]; then
+            az vm start --resource-group ${{ github.event.client_payload.resource_group }} --name ${{ github.event.client_payload.instance_name }}
+          elif [ "$ACTION" == "stop" ]; then
+            az vm deallocate --resource-group ${{ github.event.client_payload.resource_group }} --name ${{ github.event.client_payload.instance_name }}
+          fi
