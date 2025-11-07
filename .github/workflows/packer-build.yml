@@ -1,0 +1,87 @@
+name: Packer Image Build
+
+on:
+  repository_dispatch:
+    types: [build-image]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.client_payload.branch }}
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@main
+
+      - name: Authenticate to Google Cloud
+        if: github.event.client_payload.platform == 'gcp'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json_path: ${{ github.event.client_payload.gcp_key_path }}
+
+      - name: Configure AWS Credentials for IAM Role
+        if: github.event.client_payload.platform == 'aws' && github.event.client_payload.aws_role_arn
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ github.event.client_payload.aws_role_arn }}
+          aws-region: ${{ github.event.client_payload.aws_region || 'us-east-1' }}
+
+      - name: Configure AWS Credentials for Access Keys
+        if: github.event.client_payload.platform == 'aws' && !github.event.client_payload.aws_role_arn
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.client_payload.aws_region || 'us-east-1' }}
+      
+      - name: Azure Login with OIDC
+        if: github.event.client_payload.platform == 'azure' && github.event.client_payload.azure_auth_type == 'oidc'
+        uses: azure/login@v1
+        with:
+          client-id: ${{ github.event.client_payload.azure_client_id }}
+          tenant-id: ${{ github.event.client_payload.azure_tenant_id }}
+          subscription-id: ${{ github.event.client_payload.azure_subscription_id }}
+
+      - name: Azure Login with Client Secret
+        if: github.event.client_payload.platform == 'azure' && github.event.client_payload.azure_auth_type != 'oidc'
+        uses: azure/login@v1
+        with:
+          creds: '{"clientId":"${{ github.event.client_payload.azure_client_id }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ github.event.client_payload.azure_subscription_id }}","tenantId":"${{ github.event.client_payload.azure_tenant_id }}"}'
+
+      - name: 'Build Packer Image'
+        env:
+          PKR_VAR_gcp_project_id: ${{ github.event.client_payload.gcp_project_id }}
+        run: |
+          export BUILD_ID="${{ github.run_id }}"
+          export PLATFORM="${{ github.event.client_payload.platform }}"
+          export TEMPLATE_FILE="${{ github.event.client_payload.template_file }}"
+          
+          if [ ! -f "$TEMPLATE_FILE" ]; then
+            echo "Error: Template file $TEMPLATE_FILE not found in the repository's root directory."
+            exit 1
+          fi
+
+          packer init "$TEMPLATE_FILE"
+          
+          if [ "$PLATFORM" == "azure" ]; then
+            packer build \
+              -var "build_id=$BUILD_ID" \
+              -var "platform=$PLATFORM" \
+              -var "vm_size=${{ github.event.client_payload.vm_size }}" \
+              -var "managed_image_rg=${{ github.event.client_payload.azure_resource_group }}" \
+              -var "build_resource_group_name=${{ github.event.client_payload.azure_resource_group }}" \
+              "$TEMPLATE_FILE"
+          else
+            packer build \
+              -var "build_id=$BUILD_ID" \
+              -var "platform=$PLATFORM" \
+              -var "vm_size=${{ github.event.client_payload.vm_size }}" \
+              "$TEMPLATE_FILE"
+          fi
