@@ -55,19 +55,33 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ github.event.client_payload.aws_region || 'us-east-1' }}
       
+      - name: Parse Azure Credentials
+        if: github.event.client_payload.platform == 'azure'
+        id: parse_azure_creds
+        run: |
+          creds_json='${{ github.event.client_payload.azure_credentials }}'
+          auth_type=$(echo "$creds_json" | jq -r .authType)
+          client_id=$(echo "$creds_json" | jq -r .clientId)
+          tenant_id=$(echo "$creds_json" | jq -r .tenantId)
+          subscription_id=$(echo "$creds_json" | jq -r .subscriptionId)
+          echo "auth_type=$auth_type" >> $GITHUB_OUTPUT
+          echo "client_id=$client_id" >> $GITHUB_OUTPUT
+          echo "tenant_id=$tenant_id" >> $GITHUB_OUTPUT
+          echo "subscription_id=$subscription_id" >> $GITHUB_OUTPUT
+
       - name: Azure Login with OIDC
-        if: github.event.client_payload.platform == 'azure' && github.event.client_payload.azure_auth_type == 'oidc'
+        if: github.event.client_payload.platform == 'azure' && steps.parse_azure_creds.outputs.auth_type == 'oidc'
         uses: azure/login@v1
         with:
-          client-id: ${{ github.event.client_payload.azure_client_id }}
-          tenant-id: ${{ github.event.client_payload.azure_tenant_id }}
-          subscription-id: ${{ github.event.client_payload.azure_subscription_id }}
+          client-id: ${{ steps.parse_azure_creds.outputs.client_id }}
+          tenant-id: ${{ steps.parse_azure_creds.outputs.tenant_id }}
+          subscription-id: ${{ steps.parse_azure_creds.outputs.subscription_id }}
 
       - name: Azure Login with Client Secret
-        if: github.event.client_payload.platform == 'azure' && github.event.client_payload.azure_auth_type != 'oidc'
+        if: github.event.client_payload.platform == 'azure' && steps.parse_azure_creds.outputs.auth_type != 'oidc'
         uses: azure/login@v1
         with:
-          creds: '{"clientId":"${{ github.event.client_payload.azure_client_id }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ github.event.client_payload.azure_subscription_id }}","tenantId":"${{ github.event.client_payload.azure_tenant_id }}"}'
+          creds: '{"clientId":"${{ steps.parse_azure_creds.outputs.client_id }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ steps.parse_azure_creds.outputs.subscription_id }}","tenantId":"${{ steps.parse_azure_creds.outputs.tenant_id }}"}'
 
       - name: 'Build Packer Image'
         run: |
