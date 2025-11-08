@@ -32,11 +32,10 @@ jobs:
         id: gcp_creds
         run: |
           echo "Loading credentials from ${{ github.event.client_payload.gcp_key_path }}"
-          # The output is multiline, so we need special handling for GHA
-          # See: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#multiline-strings
+          CRED_JSON=$(cat "${{ github.event.client_payload.gcp_key_path }}")
           {
             echo 'gcp_credentials_json<<EOF'
-            cat "${{ github.event.client_payload.gcp_key_path }}"
+            echo "$CRED_JSON"
             echo EOF
           } >> "$GITHUB_OUTPUT"
 
@@ -49,14 +48,14 @@ jobs:
           
       - name: Configure AWS Credentials for IAM Role
         if: github.event.client_payload.platform == 'aws' && github.event.client_payload.aws_role_arn
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ github.event.client_payload.aws_role_arn }}
           aws-region: ${{ github.event.client_payload.region }}
 
       - name: Configure AWS Credentials for Access Keys
         if: github.event.client_payload.platform == 'aws' && !github.event.client_payload.aws_role_arn
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
