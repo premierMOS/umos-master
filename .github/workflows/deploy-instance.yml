@@ -24,6 +24,7 @@ jobs:
         run: |
           echo "Deploying from Terraform directory: ${{ github.event.client_payload.terraform_directory }}"
           echo "Platform: ${{ github.event.client_payload.platform }}"
+          echo "Tenant ID: ${{ github.event.client_payload.tenant_id }}"
 
       # --- Cloud Authentication ---
       - name: 'Load GCP Service Account Key'
