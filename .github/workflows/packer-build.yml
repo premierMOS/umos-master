@@ -25,11 +25,10 @@ jobs:
         id: gcp_creds
         run: |
           echo "Loading credentials from ${{ github.event.client_payload.gcp_key_path }}"
-          # The output is multiline, so we need special handling for GHA
-          # See: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#multiline-strings
+          CRED_JSON=$(cat "${{ github.event.client_payload.gcp_key_path }}")
           {
             echo 'gcp_credentials_json<<EOF'
-            cat "${{ github.event.client_payload.gcp_key_path }}"
+            echo "$CRED_JSON"
             echo EOF
           } >> "$GITHUB_OUTPUT"
 
