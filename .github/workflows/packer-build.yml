@@ -41,14 +41,14 @@ jobs:
 
       - name: Configure AWS Credentials for IAM Role
         if: github.event.client_payload.platform == 'aws' && github.event.client_payload.aws_role_arn
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ github.event.client_payload.aws_role_arn }}
           aws-region: ${{ github.event.client_payload.aws_region || 'us-east-1' }}
 
       - name: Configure AWS Credentials for Access Keys
         if: github.event.client_payload.platform == 'aws' && !github.event.client_payload.aws_role_arn
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
