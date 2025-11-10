@@ -1,0 +1,120 @@
+name: Delete Packer Image
+
+on:
+  repository_dispatch:
+    types: [delete-image]
+
+permissions:
+  id-token: write # Required to fetch the OIDC token for cloud authentication.
+  contents: read  # Required for actions/checkout.
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Debug: Show Webhook Payload'
+        run: |
+          echo "Deleting image: ${{ github.event.client_payload.image_name }}"
+          echo "Platform: ${{ github.event.client_payload.platform }}"
+
+      # --- GCP Deletion ---
+      - name: 'Load GCP Service Account Key'
+        if: github.event.client_payload.platform == 'gcp' && github.event.client_payload.gcp_key_path
+        id: gcp_creds
+        run: |
+          echo "Loading credentials from ${{ github.event.client_payload.gcp_key_path }}"
+          CRED_JSON=$(cat "${{ github.event.client_payload.gcp_key_path }}")
+          {
+            echo 'gcp_credentials_json<<EOF'
+            echo "$CRED_JSON"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        if: github.event.client_payload.platform == 'gcp'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: ${{ steps.gcp_creds.outputs.gcp_credentials_json || github.event.client_payload.gcp_credentials_json }}
+      
+      - name: Delete GCP Image
+        if: github.event.client_payload.platform == 'gcp'
+        run: |
+          gcloud compute images delete ${{ github.event.client_payload.image_name }} --project=${{ github.event.client_payload.project_id }} --quiet
+
+      # --- AWS Deletion ---
+      - name: Configure AWS Credentials for IAM Role
+        if: github.event.client_payload.platform == 'aws' && github.event.client_payload.aws_role_arn
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ github.event.client_payload.aws_role_arn }}
+          aws-region: ${{ github.event.client_payload.region || 'us-east-1' }}
+
+      - name: Configure AWS Credentials for Access Keys
+        if: github.event.client_payload.platform == 'aws' && !github.event.client_payload.aws_role_arn
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.client_payload.region || 'us-east-1' }}
+
+      - name: Find and Delete AWS AMI
+        if: github.event.client_payload.platform == 'aws'
+        run: |
+          AMI_NAME="${{ github.event.client_payload.image_name }}"
+          echo "Finding AMI with name: $AMI_NAME"
+          
+          AMI_ID=$(aws ec2 describe-images --owners self --filters "Name=name,Values=$AMI_NAME" --query 'Images[0].ImageId' --output text)
+          
+          if [ -z "$AMI_ID" ] || [ "$AMI_ID" == "None" ]; then
+            echo "AMI with name '$AMI_NAME' not found. It might have been deleted already."
+            exit 0
+          fi
+          
+          echo "Found AMI ID: $AMI_ID. Deregistering..."
+          aws ec2 deregister-image --image-id $AMI_ID
+          
+          SNAPSHOT_ID=$(aws ec2 describe-images --image-ids $AMI_ID --query 'Images[0].BlockDeviceMappings[0].Ebs.SnapshotId' --output text)
+          if [ -n "$SNAPSHOT_ID" ] && [ "$SNAPSHOT_ID" != "None" ]; then
+            echo "Deleting associated snapshot ID: $SNAPSHOT_ID"
+            # Wait for the AMI to be fully deregistered before deleting the snapshot
+            aws ec2 wait image-available --image-ids $AMI_ID --filters Name=state,Values=deregistered || echo "Wait failed, proceeding with snapshot deletion."
+            sleep 15 # Add a small delay for safety
+            aws ec2 delete-snapshot --snapshot-id $SNAPSHOT_ID
+          else
+            echo "Could not find associated snapshot."
+          fi
+          echo "AMI deregistration and snapshot deletion process initiated."
+
+      # --- Azure Deletion ---
+      - name: Parse Azure Credentials
+        if: github.event.client_payload.platform == 'azure'
+        id: parse_azure_creds
+        run: |
+          creds_json='${{ github.event.client_payload.azure_credentials }}'
+          auth_type=$(echo "$creds_json" | jq -r .authType)
+          client_id=$(echo "$creds_json" | jq -r .clientId)
+          tenant_id=$(echo "$creds_json" | jq -r .tenantId)
+          subscription_id=$(echo "$creds_json" | jq -r .subscriptionId)
+          echo "auth_type=$auth_type" >> $GITHUB_OUTPUT
+          echo "client_id=$client_id" >> $GITHUB_OUTPUT
+          echo "tenant_id=$tenant_id" >> $GITHUB_OUTPUT
+          echo "subscription_id=$subscription_id" >> $GITHUB_OUTPUT
+
+      - name: Azure Login with OIDC
+        if: github.event.client_payload.platform == 'azure' && steps.parse_azure_creds.outputs.auth_type == 'oidc'
+        uses: azure/login@v1
+        with:
+          client-id: ${{ steps.parse_azure_creds.outputs.client_id }}
+          tenant-id: ${{ steps.parse_azure_creds.outputs.tenant_id }}
+          subscription-id: ${{ steps.parse_azure_creds.outputs.subscription_id }}
+
+      - name: Azure Login with Client Secret
+        if: github.event.client_payload.platform == 'azure' && steps.parse_azure_creds.outputs.auth_type != 'oidc'
+        uses: azure/login@v1
+        with:
+          creds: '{"clientId":"${{ steps.parse_azure_creds.outputs.client_id }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ steps.parse_azure_creds.outputs.subscription_id }}","tenantId":"${{ steps.parse_azure_creds.outputs.tenant_id }}"}'
+
+      - name: Delete Azure Image
+        if: github.event.client_payload.platform == 'azure'
+        run: |
+          az image delete --resource-group ${{ github.event.client_payload.resource_group }} --name ${{ github.event.client_payload.image_name }} --yes
