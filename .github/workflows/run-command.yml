@@ -33,8 +33,4 @@ jobs:
       - name: Run Ansible Command
         id: adhoc
         run: |
-          output=$(ansible ${{ github.event.client_payload.target_ip }} -i "${{ github.event.client_payload.target_ip }}," -m shell -a "${{ github.event.client_payload.command }}" --user ${{ github.event.client_payload.ssh_user }} --private-key ~/.ssh/id_rsa)
-          echo "$output"
-          echo "output<<EOF" >> $GITHUB_OUTPUT
-          echo "$output" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          ansible ${{ github.event.client_payload.target_ip }} -i "${{ github.event.client_payload.target_ip }}," -m shell -a "${{ github.event.client_payload.command }}" --user ${{ github.event.client_payload.ssh_user }} --private-key ~/.ssh/id_rsa
