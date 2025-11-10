@@ -1,5 +1,0 @@
-[command]/home/runner/work/_temp/aadba2ca-b474-4ebc-8157-6d9431771698/terraform-bin -chdir=deployments/tenant-manager-001/test-multi-1 output -raw instance_id
-i-0f315fdfe5adb9422::debug::Terraform exited with code 0.
-::debug::stdout: i-0f315fdfe5adb9422
-::debug::stderr: 
-::debug::exitcode: 0
