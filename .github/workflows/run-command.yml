@@ -25,8 +25,10 @@ jobs:
 
       - name: Extract SSH key from Terraform state
         id: ssh_key_setup
+        env:
+          TF_DIR: ${{ github.event.client_payload.terraform_directory }}
         run: |
-          TF_STATE_FILE="${{ github.event.client_payload.terraform_directory }}/terraform.tfstate"
+          TF_STATE_FILE="$TF_DIR/terraform.tfstate"
 
           if [ ! -f "$TF_STATE_FILE" ]; then
             echo "::error::Terraform state file not found at $TF_STATE_FILE. Cannot retrieve SSH key."
