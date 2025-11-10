@@ -100,7 +100,7 @@ jobs:
           TF_DIR="${{ github.event.client_payload.terraform_directory }}"
           if [ -d "$TF_DIR" ]; then
             terraform -chdir=$TF_DIR init
-            terraform -chdir=$TF_DIR destroy -auto-approve -no-color
+            terraform -chdir=$TF_DIR destroy -refresh=false -auto-approve -no-color
           else
             echo "Terraform directory not found, skipping destroy."
           fi
