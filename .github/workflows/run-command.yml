@@ -1,0 +1,40 @@
+name: Run Ad-Hoc Command
+
+on:
+  repository_dispatch:
+    types: [run-ad-hoc-command]
+
+jobs:
+  run-command:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.client_payload.branch }}
+          
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Ansible
+        run: pip install ansible
+
+      - name: Set up SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ github.event.client_payload.target_ip }} >> ~/.ssh/known_hosts
+
+      - name: Run Ansible Command
+        id: adhoc
+        run: |
+          output=$(ansible ${{ github.event.client_payload.target_ip }} -i "${{ github.event.client_payload.target_ip }}," -m shell -a "${{ github.event.client_payload.command }}" --user ${{ github.event.client_payload.ssh_user }} --private-key ~/.ssh/id_rsa)
+          echo "$output"
+          echo "output<<EOF" >> $GITHUB_OUTPUT
+          echo "$output" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
