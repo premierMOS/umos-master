@@ -18,18 +18,28 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install Ansible
-        run: pip install ansible
-
-      - name: Set up SSH key
-        id: ssh_key_setup
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+      - name: Install Ansible and jq
         run: |
-          if [ -z "$SSH_PRIVATE_KEY" ]; then
-            echo "::error::ANSIBLE_SSH_PRIVATE_KEY secret is not set in the repository secrets. This is required for the web shell to connect to instances."
+          pip install ansible
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Extract SSH key from Terraform state
+        id: ssh_key_setup
+        run: |
+          TF_STATE_FILE="${{ github.event.client_payload.terraform_directory }}/terraform.tfstate"
+
+          if [ ! -f "$TF_STATE_FILE" ]; then
+            echo "::error::Terraform state file not found at $TF_STATE_FILE. Cannot retrieve SSH key."
             exit 1
           fi
+          
+          SSH_PRIVATE_KEY=$(jq -r '.outputs.private_ssh_key.value' "$TF_STATE_FILE")
+
+          if [ -z "$SSH_PRIVATE_KEY" ] || [ "$SSH_PRIVATE_KEY" == "null" ]; then
+            echo "::error::private_ssh_key not found in Terraform state outputs. This instance may be Windows or was deployed without an SSH key."
+            exit 1
+          fi
+          
           KEY_DIR=$(mktemp -d)
           echo "$SSH_PRIVATE_KEY" > "$KEY_DIR/id_rsa"
           chmod 600 "$KEY_DIR/id_rsa"
