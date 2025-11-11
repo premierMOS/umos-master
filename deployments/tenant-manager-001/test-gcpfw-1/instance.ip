@@ -1,5 +1,0 @@
-[command]/home/runner/work/_temp/a5225640-2188-4e85-8e00-a96f858b1662/terraform-bin -chdir=deployments/tenant-manager-001/test-gcpfw-1 output -raw private_ip
-10.115.0.2::debug::Terraform exited with code 0.
-::debug::stdout: 10.115.0.2
-::debug::stderr: 
-::debug::exitcode: 0

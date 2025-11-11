@@ -1,5 +1,0 @@
-[command]/home/runner/work/_temp/a5225640-2188-4e85-8e00-a96f858b1662/terraform-bin -chdir=deployments/tenant-manager-001/test-gcpfw-1 output -raw instance_id
-8815417874156764557::debug::Terraform exited with code 0.
-::debug::stdout: 8815417874156764557
-::debug::stderr: 
-::debug::exitcode: 0
