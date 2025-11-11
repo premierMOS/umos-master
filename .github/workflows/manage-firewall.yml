@@ -1,0 +1,136 @@
+name: Manage Firewall Rule
+
+on:
+  repository_dispatch:
+    types: [manage-firewall-rule]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  manage-rule:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Debug: Show Webhook Payload'
+        run: |
+          echo "Action: ${{ github.event.client_payload.action }}"
+          echo "Platform: ${{ github.event.client_payload.platform }}"
+          echo "Rule Name: ${{ github.event.client_payload.rule_name }}"
+
+      # --- Cloud Auth ---
+      - name: 'Load GCP Service Account Key'
+        if: github.event.client_payload.platform == 'gcp' && github.event.client_payload.gcp_key_path
+        id: gcp_creds
+        run: |
+          echo "Loading credentials from ${{ github.event.client_payload.gcp_key_path }}"
+          CRED_JSON=$(cat "${{ github.event.client_payload.gcp_key_path }}")
+          {
+            echo 'gcp_credentials_json<<EOF'
+            echo "$CRED_JSON"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - name: Authenticate to Google Cloud
+        if: github.event.client_payload.platform == 'gcp'
+        id: gcp_auth
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: ${{ steps.gcp_creds.outputs.gcp_credentials_json || github.event.client_payload.gcp_credentials_json }}
+      - name: Configure AWS Credentials for IAM Role
+        if: github.event.client_payload.platform == 'aws' && github.event.client_payload.aws_role_arn
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ github.event.client_payload.aws_role_arn }}
+          aws-region: ${{ github.event.client_payload.region || 'us-east-1' }}
+      - name: Configure AWS Credentials for Access Keys
+        if: github.event.client_payload.platform == 'aws' && !github.event.client_payload.aws_role_arn
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.client_payload.region || 'us-east-1' }}
+      - name: Parse Azure Credentials
+        if: github.event.client_payload.platform == 'azure'
+        id: parse_azure_creds
+        run: |
+          creds_json='${{ github.event.client_payload.azure_credentials }}'
+          auth_type=$(echo "$creds_json" | jq -r .authType)
+          client_id=$(echo "$creds_json" | jq -r .clientId)
+          tenant_id=$(echo "$creds_json" | jq -r .tenantId)
+          subscription_id=$(echo "$creds_json" | jq -r .subscriptionId)
+          echo "auth_type=$auth_type" >> $GITHUB_OUTPUT
+          echo "client_id=$client_id" >> $GITHUB_OUTPUT
+          echo "tenant_id=$tenant_id" >> $GITHUB_OUTPUT
+          echo "subscription_id=$subscription_id" >> $GITHUB_OUTPUT
+      - name: Azure Login with OIDC
+        if: github.event.client_payload.platform == 'azure' && steps.parse_azure_creds.outputs.auth_type == 'oidc'
+        uses: azure/login@v1
+        with:
+          client-id: ${{ steps.parse_azure_creds.outputs.client_id }}
+          tenant-id: ${{ steps.parse_azure_creds.outputs.tenant_id }}
+          subscription-id: ${{ steps.parse_azure_creds.outputs.subscription_id }}
+      - name: Azure Login with Client Secret
+        if: github.event.client_payload.platform == 'azure' && steps.parse_azure_creds.outputs.auth_type != 'oidc'
+        uses: azure/login@v1
+        with:
+          creds: '{"clientId":"${{ steps.parse_azure_creds.outputs.client_id }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ steps.parse_azure_creds.outputs.subscription_id }}","tenantId":"${{ steps.parse_azure_creds.outputs.tenant_id }}"}'
+
+      # --- Firewall Rule Management ---
+      - name: Manage AWS Security Group Rule
+        if: github.event.client_payload.platform == 'aws'
+        run: |
+          ACTION="${{ github.event.client_payload.action }}"
+          SG_ID="${{ github.event.client_payload.security_group_id }}"
+          PROTOCOL="${{ github.event.client_payload.protocol }}"
+          PORT_RANGE="${{ github.event.client_payload.port_range }}"
+          SOURCE_CIDR="${{ github.event.client_payload.source }}"
+
+          if [[ $PORT_RANGE == *-* ]]; then
+            FROM_PORT=$(echo $PORT_RANGE | cut -d'-' -f1)
+            TO_PORT=$(echo $PORT_RANGE | cut -d'-' -f2)
+          else
+            FROM_PORT=$PORT_RANGE
+            TO_PORT=$PORT_RANGE
+          fi
+
+          if [ "$ACTION" == "add" ]; then
+            aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol "$PROTOCOL" --from-port "$FROM_PORT" --to-port "$TO_PORT" --cidr "$SOURCE_CIDR"
+          elif [ "$ACTION" == "remove" ]; then
+            aws ec2 revoke-security-group-ingress --group-id "$SG_ID" --protocol "$PROTOCOL" --from-port "$FROM_PORT" --to-port "$TO_PORT" --cidr "$SOURCE_CIDR"
+          fi
+      
+      - name: Manage Azure NSG Rule
+        if: github.event.client_payload.platform == 'azure'
+        run: |
+          ACTION="${{ github.event.client_payload.action }}"
+          NSG_NAME="${{ github.event.client_payload.nsg_name }}"
+          RG_NAME="${{ github.event.client_payload.resource_group }}"
+          RULE_NAME="${{ github.event.client_payload.rule_name }}"
+          
+          if [ "$ACTION" == "add" ]; then
+            START_PORT=$(echo ${{ github.event.client_payload.port_range }} | cut -d'-' -f1)
+            PRIORITY=$((2000 + START_PORT))
+            az network nsg rule create --resource-group "$RG_NAME" --nsg-name "$NSG_NAME" --name "$RULE_NAME" --priority "$PRIORITY" --protocol "${{ github.event.client_payload.protocol }}" --destination-port-ranges "${{ github.event.client_payload.port_range }}" --source-address-prefixes "${{ github.event.client_payload.source }}" --access Allow --direction Inbound
+          elif [ "$ACTION" == "remove" ]; then
+            az network nsg rule delete --resource-group "$RG_NAME" --nsg-name "$NSG_NAME" --name "$RULE_NAME" --no-wait
+          fi
+
+      - name: Manage GCP Firewall Rule
+        if: github.event.client_payload.platform == 'gcp'
+        run: |
+          ACTION="${{ github.event.client_payload.action }}"
+          PROJECT_ID="${{ github.event.client_payload.project_id }}"
+          NETWORK_TAGS_JSON='${{ github.event.client_payload.network_tags }}'
+          NETWORK_TAGS=$(echo "$NETWORK_TAGS_JSON" | jq -r 'join(",")')
+          RULE_NAME="${{ github.event.client_payload.rule_name }}"
+          
+          if [ "$ACTION" == "add" ]; then
+            gcloud compute firewall-rules create "$RULE_NAME" \
+              --project="$PROJECT_ID" \
+              --allow="${{ github.event.client_payload.protocol }}:${{ github.event.client_payload.port_range }}" \
+              --source-ranges="${{ github.event.client_payload.source }}" \
+              --target-tags="$NETWORK_TAGS" \
+              --network="pmos-tenant-${{ github.event.client_payload.tenant_id }}-vpc"
+          elif [ "$ACTION" == "remove" ]; then
+            gcloud compute firewall-rules delete "$RULE_NAME" --project="$PROJECT_ID" --quiet
+          fi
