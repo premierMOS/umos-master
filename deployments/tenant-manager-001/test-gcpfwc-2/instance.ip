@@ -1,0 +1,2 @@
+[command]/home/runner/work/_temp/cd939948-fb3a-424b-beb5-9a32c9ae6677/terraform-bin -chdir=deployments/tenant-manager-001/test-gcpfwc-2 output -raw private_ip
+10.245.0.2
