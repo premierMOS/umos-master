@@ -109,16 +109,22 @@ jobs:
           BRANCH="${{ github.event.client_payload.branch }}"
           PLATFORM="${{ github.event.client_payload.platform }}"
           
-          # Extract outputs and save to files
-          terraform -chdir=$TF_DIR output -raw private_ip > "$TF_DIR/instance.ip"
-          terraform -chdir=$TF_DIR output -raw instance_id > "$TF_DIR/instance.id"
+          # Extract outputs to variables and then echo to files for robustness
+          IP_ADDRESS=$(terraform -chdir=$TF_DIR output -raw private_ip)
+          echo "$IP_ADDRESS" > "$TF_DIR/instance.ip"
+
+          INSTANCE_ID=$(terraform -chdir=$TF_DIR output -raw instance_id)
+          echo "$INSTANCE_ID" > "$TF_DIR/instance.id"
           
           if [ "$PLATFORM" == "aws" ]; then
-            terraform -chdir=$TF_DIR output -raw security_group_id > "$TF_DIR/instance.sg"
+            SG_ID=$(terraform -chdir=$TF_DIR output -raw security_group_id)
+            echo "$SG_ID" > "$TF_DIR/instance.sg"
           elif [ "$PLATFORM" == "azure" ]; then
-            terraform -chdir=$TF_DIR output -raw network_security_group_name > "$TF_DIR/instance.nsg"
+            NSG_NAME=$(terraform -chdir=$TF_DIR output -raw network_security_group_name)
+            echo "$NSG_NAME" > "$TF_DIR/instance.nsg"
           elif [ "$PLATFORM" == "gcp" ]; then
-            terraform -chdir=$TF_DIR output -json network_tags > "$TF_DIR/instance.tags"
+            TAGS=$(terraform -chdir=$TF_DIR output -json network_tags)
+            echo "$TAGS" > "$TF_DIR/instance.tags"
           fi
 
           git config user.name "github-actions[bot]"
