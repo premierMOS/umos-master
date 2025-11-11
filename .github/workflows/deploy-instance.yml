@@ -70,10 +70,10 @@ jobs:
           client_id=$(echo "$creds_json" | jq -r .clientId)
           tenant_id=$(echo "$creds_json" | jq -r .tenantId)
           subscription_id=$(echo "$creds_json" | jq -r .subscriptionId)
-          echo "auth_type=$auth_type" >> $GITHUB_OUTPUT
-          echo "client_id=$client_id" >> $GITHUB_OUTPUT
-          echo "tenant_id=$tenant_id" >> $GITHUB_OUTPUT
-          echo "subscription_id=$subscription_id" >> $GITHUB_OUTPUT
+          echo "auth_type=$auth_type" >> "$GITHUB_OUTPUT"
+          echo "client_id=$client_id" >> "$GITHUB_OUTPUT"
+          echo "tenant_id=$tenant_id" >> "$GITHUB_OUTPUT"
+          echo "subscription_id=$subscription_id" >> "$GITHUB_OUTPUT"
 
       - name: Azure Login with OIDC
         if: github.event.client_payload.platform == 'azure' && steps.parse_azure_creds.outputs.auth_type == 'oidc'
@@ -109,13 +109,15 @@ jobs:
           BRANCH="${{ github.event.client_payload.branch }}"
           PLATFORM="${{ github.event.client_payload.platform }}"
           
-          # Extract outputs and clean them up. The output from the runner sometimes includes
-          # the command invocation text. We extract the last word to get the actual value.
+          # Extract outputs and clean them up from potential runner log noise.
           IP_ADDRESS_RAW=$(terraform -chdir=$TF_DIR output -raw private_ip)
-          IP_ADDRESS=$(echo "$IP_ADDRESS_RAW" | awk '{print $NF}')
+          # Grep for an IPv4 address pattern to robustly extract the IP, even if it's not the last word.
+          IP_ADDRESS=$(echo "$IP_ADDRESS_RAW" | grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | head -n 1)
           echo "$IP_ADDRESS" > "$TF_DIR/instance.ip"
 
           INSTANCE_ID_RAW=$(terraform -chdir=$TF_DIR output -raw instance_id)
+          # The output from the runner sometimes includes the command invocation text. 
+          # We extract the last word to get the actual value. This is a best-effort for varied ID formats.
           INSTANCE_ID=$(echo "$INSTANCE_ID_RAW" | awk '{print $NF}')
           echo "$INSTANCE_ID" > "$TF_DIR/instance.id"
           
