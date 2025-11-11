@@ -102,35 +102,24 @@ jobs:
         id: apply
         run: terraform -chdir=${{ github.event.client_payload.terraform_directory }} apply -auto-approve -no-color
       
-      - name: Commit IP Address, Instance ID, and State
+      - name: Commit Instance Details and State
         if: steps.apply.outcome == 'success'
         run: |
           TF_DIR="${{ github.event.client_payload.terraform_directory }}"
           BRANCH="${{ github.event.client_payload.branch }}"
+          PLATFORM="${{ github.event.client_payload.platform }}"
           
-          # Extract private IP
-          IP_ADDRESS_OUTPUT=$(terraform -chdir=$TF_DIR output -raw private_ip)
-          echo "Raw private_ip output: '$IP_ADDRESS_OUTPUT'"
-          IP_ADDRESS=$(echo "$IP_ADDRESS_OUTPUT" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n 1)
-          echo "Extracted IP: '$IP_ADDRESS'"
-          if [ -z "$IP_ADDRESS" ]; then
-            echo "::error::Failed to extract a valid private_ip from Terraform output."
-            terraform -chdir=$TF_DIR output
-            exit 1
-          fi
-          echo -n "$IP_ADDRESS" > "$TF_DIR/instance.ip"
+          # Extract outputs and save to files
+          terraform -chdir=$TF_DIR output -raw private_ip > "$TF_DIR/instance.ip"
+          terraform -chdir=$TF_DIR output -raw instance_id > "$TF_DIR/instance.id"
           
-          # Extract cloud instance ID, cleaning up potential runner debug output
-          INSTANCE_ID_OUTPUT=$(terraform -chdir=$TF_DIR output -raw instance_id)
-          echo "Raw instance_id output: '$INSTANCE_ID_OUTPUT'"
-          INSTANCE_ID_CLEAN=$(echo "$INSTANCE_ID_OUTPUT" | sed 's/::debug::.*//')
-          INSTANCE_ID=$(echo "$INSTANCE_ID_CLEAN" | awk 'NF' | tail -n 1 | xargs)
-          echo "Extracted Instance ID: '$INSTANCE_ID'"
-          if [ -z "$INSTANCE_ID" ]; then
-            echo "::error::Failed to extract a valid instance_id from Terraform output."
-            exit 1
+          if [ "$PLATFORM" == "aws" ]; then
+            terraform -chdir=$TF_DIR output -raw security_group_id > "$TF_DIR/instance.sg"
+          elif [ "$PLATFORM" == "azure" ]; then
+            terraform -chdir=$TF_DIR output -raw network_security_group_name > "$TF_DIR/instance.nsg"
+          elif [ "$PLATFORM" == "gcp" ]; then
+            terraform -chdir=$TF_DIR output -json network_tags > "$TF_DIR/instance.tags"
           fi
-          echo -n "$INSTANCE_ID" > "$TF_DIR/instance.id"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -138,11 +127,11 @@ jobs:
           git add "$TF_DIR/instance.ip"
           git add "$TF_DIR/instance.id"
           git add "$TF_DIR/terraform.tfstate"
+          git add "$TF_DIR/instance.sg" "$TF_DIR/instance.nsg" "$TF_DIR/instance.tags" || true # Ignore errors if files don't exist
           
           # Only commit if there are staged changes
           if ! git diff --staged --quiet; then
             git commit -m "ci: Deploy ${{ github.event.client_payload.instance_name }} and save state"
-            # Pull remote changes with rebase before pushing to handle concurrent runs
             git pull --rebase origin "$BRANCH"
             git push origin HEAD:"$BRANCH"
           else
