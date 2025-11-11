@@ -109,24 +109,26 @@ jobs:
           BRANCH="${{ github.event.client_payload.branch }}"
           PLATFORM="${{ github.event.client_payload.platform }}"
           
-          # Extract outputs and clean them to remove any appended GitHub Actions runner debug info.
+          # Extract outputs and clean them up. The output from the runner sometimes includes
+          # the command invocation text. We extract the last word to get the actual value.
           IP_ADDRESS_RAW=$(terraform -chdir=$TF_DIR output -raw private_ip)
-          IP_ADDRESS=${IP_ADDRESS_RAW%%::*}
+          IP_ADDRESS=$(echo "$IP_ADDRESS_RAW" | awk '{print $NF}')
           echo "$IP_ADDRESS" > "$TF_DIR/instance.ip"
 
           INSTANCE_ID_RAW=$(terraform -chdir=$TF_DIR output -raw instance_id)
-          INSTANCE_ID=${INSTANCE_ID_RAW%%::*}
+          INSTANCE_ID=$(echo "$INSTANCE_ID_RAW" | awk '{print $NF}')
           echo "$INSTANCE_ID" > "$TF_DIR/instance.id"
           
           if [ "$PLATFORM" == "aws" ]; then
             SG_ID_RAW=$(terraform -chdir=$TF_DIR output -raw security_group_id)
-            SG_ID=${SG_ID_RAW%%::*}
+            SG_ID=$(echo "$SG_ID_RAW" | awk '{print $NF}')
             echo "$SG_ID" > "$TF_DIR/instance.sg"
           elif [ "$PLATFORM" == "azure" ]; then
             NSG_NAME_RAW=$(terraform -chdir=$TF_DIR output -raw network_security_group_name)
-            NSG_NAME=${NSG_NAME_RAW%%::*}
+            NSG_NAME=$(echo "$NSG_NAME_RAW" | awk '{print $NF}')
             echo "$NSG_NAME" > "$TF_DIR/instance.nsg"
           elif [ "$PLATFORM" == "gcp" ]; then
+            # JSON output is less likely to have this issue.
             TAGS=$(terraform -chdir=$TF_DIR output -json network_tags)
             echo "$TAGS" > "$TF_DIR/instance.tags"
           fi
