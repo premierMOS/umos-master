@@ -1,0 +1,2 @@
+[command]/home/runner/work/_temp/47e39256-dca4-409a-aa31-526cddf43cc8/terraform-bin -chdir=deployments/tenant-manager-001/test-gcpfwc-3 output -raw instance_id
+3887178055751182866
