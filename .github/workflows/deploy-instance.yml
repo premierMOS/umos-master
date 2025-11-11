@@ -130,8 +130,10 @@ jobs:
             NSG_NAME=$(echo "$NSG_NAME_RAW" | awk '{print $NF}')
             echo "$NSG_NAME" > "$TF_DIR/instance.nsg"
           elif [ "$PLATFORM" == "gcp" ]; then
-            # JSON output is less likely to have this issue.
-            TAGS=$(terraform -chdir=$TF_DIR output -json network_tags)
+            # JSON output from terraform can sometimes be preceded by runner logs.
+            # Extract the JSON array to ensure a clean file.
+            TAGS_RAW=$(terraform -chdir=$TF_DIR output -json network_tags)
+            TAGS=$(echo "$TAGS_RAW" | grep -o '\[.*\]')
             echo "$TAGS" > "$TF_DIR/instance.tags"
           fi
 
