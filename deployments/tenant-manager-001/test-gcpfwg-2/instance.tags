@@ -1,0 +1,6 @@
+[command]/home/runner/work/_temp/790bd291-0778-42fa-b51c-15db79add91b/terraform-bin -chdir=deployments/tenant-manager-001/test-gcpfwg-2 output -json network_tags
+["allow-ssh-test-gcpfwg-2","ssh-via-iap"]
+::debug::Terraform exited with code 0.
+::debug::stdout: ["allow-ssh-test-gcpfwg-2","ssh-via-iap"]%0A
+::debug::stderr: 
+::debug::exitcode: 0
