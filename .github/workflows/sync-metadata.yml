@@ -1,0 +1,153 @@
+name: Sync Instance Metadata
+
+on:
+  repository_dispatch:
+    types: [sync-instance-metadata]
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.client_payload.branch }}
+      
+      # --- Cloud Auth (Copied from Manage Instance Workflow) ---
+      - name: 'Load GCP Service Account Key'
+        if: github.event.client_payload.platform == 'gcp' && github.event.client_payload.gcp_key_path
+        id: gcp_creds
+        run: |
+          echo "Loading credentials from ${{ github.event.client_payload.gcp_key_path }}"
+          CRED_JSON=$(cat "${{ github.event.client_payload.gcp_key_path }}")
+          {
+            echo 'gcp_credentials_json<<EOF'
+            echo "$CRED_JSON"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - name: Authenticate to Google Cloud
+        if: github.event.client_payload.platform == 'gcp'
+        id: gcp_auth
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: ${{ steps.gcp_creds.outputs.gcp_credentials_json || github.event.client_payload.gcp_credentials_json }}
+      - name: Configure AWS Credentials for IAM Role
+        if: github.event.client_payload.platform == 'aws' && github.event.client_payload.aws_role_arn
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ github.event.client_payload.aws_role_arn }}
+          aws-region: ${{ github.event.client_payload.region || 'us-east-1' }}
+      - name: Configure AWS Credentials for Access Keys
+        if: github.event.client_payload.platform == 'aws' && !github.event.client_payload.aws_role_arn
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.client_payload.region || 'us-east-1' }}
+      - name: Parse Azure Credentials
+        if: github.event.client_payload.platform == 'azure'
+        id: parse_azure_creds
+        run: |
+          creds_json='${{ github.event.client_payload.azure_credentials }}'
+          auth_type=$(echo "$creds_json" | jq -r .authType)
+          client_id=$(echo "$creds_json" | jq -r .clientId)
+          tenant_id=$(echo "$creds_json" | jq -r .tenantId)
+          subscription_id=$(echo "$creds_json" | jq -r .subscriptionId)
+          echo "auth_type=$auth_type" >> $GITHUB_OUTPUT
+          echo "client_id=$client_id" >> $GITHUB_OUTPUT
+          echo "tenant_id=$tenant_id" >> $GITHUB_OUTPUT
+          echo "subscription_id=$subscription_id" >> $GITHUB_OUTPUT
+      - name: Azure Login with OIDC
+        if: github.event.client_payload.platform == 'azure' && steps.parse_azure_creds.outputs.auth_type == 'oidc'
+        uses: azure/login@v1
+        with:
+          client-id: ${{ steps.parse_azure_creds.outputs.client_id }}
+          tenant-id: ${{ steps.parse_azure_creds.outputs.tenant_id }}
+          subscription-id: ${{ steps.parse_azure_creds.outputs.subscription_id }}
+      - name: Azure Login with Client Secret
+        if: github.event.client_payload.platform == 'azure' && steps.parse_azure_creds.outputs.auth_type != 'oidc'
+        uses: azure/login@v1
+        with:
+          creds: '{"clientId":"${{ steps.parse_azure_creds.outputs.client_id }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ steps.parse_azure_creds.outputs.subscription_id }}","tenantId":"${{ steps.parse_azure_creds.outputs.tenant_id }}"}'
+
+      # --- Fetch and Commit Metadata ---
+      - name: Fetch and Commit AWS Metadata
+        if: github.event.client_payload.platform == 'aws'
+        run: |
+          INSTANCE_ID="${{ github.event.client_payload.cloud_instance_id }}"
+          TF_DIR="${{ github.event.client_payload.terraform_directory }}"
+          echo "Fetching Security Group ID for AWS instance: $INSTANCE_ID"
+          SG_ID=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' --output text)
+          if [ -z "$SG_ID" ] || [ "$SG_ID" == "None" ]; then
+            echo "::error::Could not retrieve Security Group ID for instance $INSTANCE_ID."
+            exit 1
+          fi
+          echo "Found Security Group ID: $SG_ID"
+          mkdir -p "$TF_DIR"
+          echo "$SG_ID" > "$TF_DIR/instance.sg"
+      
+      - name: Fetch and Commit Azure Metadata
+        if: github.event.client_payload.platform == 'azure'
+        run: |
+          VM_NAME="${{ github.event.client_payload.instance_name }}"
+          RG_NAME="${{ github.event.client_payload.resource_group }}"
+          TF_DIR="${{ github.event.client_payload.terraform_directory }}"
+          echo "Fetching Network Security Group for Azure VM: $VM_NAME in RG: $RG_NAME"
+          NIC_ID=$(az vm show --resource-group "$RG_NAME" --name "$VM_NAME" --query 'networkProfile.networkInterfaces[0].id' --output tsv)
+          if [ -z "$NIC_ID" ]; then
+            echo "::error::Could not find network interface for VM $VM_NAME."
+            exit 1
+          fi
+          NSG_NAME=$(az network nic show --ids "$NIC_ID" --query 'networkSecurityGroup.name' --output tsv)
+          if [ -z "$NSG_NAME" ]; then
+            echo "::warning::Could not find a Network Security Group directly attached to the NIC for VM $VM_NAME. This is expected if the NSG is on the subnet."
+            # Attempt to find NSG on subnet
+            SUBNET_ID=$(az network nic show --ids "$NIC_ID" --query 'ipConfigurations[0].subnet.id' -o tsv)
+            NSG_NAME=$(az network vnet subnet show --ids $SUBNET_ID --query 'networkSecurityGroup.name' -o tsv)
+            if [ -z "$NSG_NAME" ]; then
+              echo "::error::Could not find NSG on NIC or subnet."
+              exit 1
+            fi
+          fi
+          echo "Found NSG Name: $NSG_NAME"
+          mkdir -p "$TF_DIR"
+          echo "$NSG_NAME" > "$TF_DIR/instance.nsg"
+          
+      - name: Fetch and Commit GCP Metadata
+        if: github.event.client_payload.platform == 'gcp'
+        run: |
+          INSTANCE_NAME="${{ github.event.client_payload.instance_name }}"
+          PROJECT_ID="${{ github.event.client_payload.project_id }}"
+          ZONE="${{ github.event.client_payload.region }}"
+          TF_DIR="${{ github.event.client_payload.terraform_directory }}"
+          echo "Fetching Network Tags for GCP instance: $INSTANCE_NAME"
+          # Create directory if it doesn't exist
+          mkdir -p "$TF_DIR"
+          # The output of the describe command is already a JSON object with a 'tags' key.
+          gcloud compute instances describe "$INSTANCE_NAME" --project="$PROJECT_ID" --zone="$ZONE" --format='json(tags.items)' > "$TF_DIR/instance.tags.tmp"
+          # The output is {"tags": {"items": [...]}}. We just want the array.
+          jq '.tags.items' "$TF_DIR/instance.tags.tmp" > "$TF_DIR/instance.tags"
+          rm "$TF_DIR/instance.tags.tmp"
+
+      - name: Commit Metadata Files
+        run: |
+          BRANCH="${{ github.event.client_payload.branch }}"
+          TF_DIR="${{ github.event.client_payload.terraform_directory }}"
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Add any of the files that were created
+          git add "$TF_DIR/instance.sg" "$TF_DIR/instance.nsg" "$TF_DIR/instance.tags"
+          
+          if ! git diff --staged --quiet; then
+            git commit -m "ci: Sync networking metadata for ${{ github.event.client_payload.instance_name }}"
+            git pull --rebase origin "$BRANCH"
+            git push origin HEAD:"$BRANCH"
+          else
+            echo "No new metadata to commit."
+          fi
