@@ -137,8 +137,15 @@ jobs:
           git add "$TF_DIR/instance.ip"
           git add "$TF_DIR/instance.id"
           git add "$TF_DIR/terraform.tfstate"
-          # Use 'git add --force' for files that might not exist, ignoring errors if they don't.
-          git add -f "$TF_DIR/instance.sg" "$TF_DIR/instance.nsg" "$TF_DIR/instance.tags"
+          
+          # Conditionally add platform-specific metadata files
+          if [ "$PLATFORM" == "aws" ]; then
+            git add "$TF_DIR/instance.sg"
+          elif [ "$PLATFORM" == "azure" ]; then
+            git add "$TF_DIR/instance.nsg"
+          elif [ "$PLATFORM" == "gcp" ]; then
+            git add "$TF_DIR/instance.tags"
+          fi
           
           # Only commit if there are staged changes
           if ! git diff --staged --quiet; then
