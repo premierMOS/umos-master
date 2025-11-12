@@ -1,0 +1,17 @@
+
+- hosts: all
+  become: yes
+  tasks:
+    - name: Update security packages (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+        upgrade: dist
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Update security packages (RHEL/CentOS/Fedora)
+      yum:
+        name: '*'
+        state: latest
+        security: yes
+      when: ansible_os_family == "RedHat"
