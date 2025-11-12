@@ -1,0 +1,36 @@
+name: Run Ansible Patching Job
+
+on:
+  repository_dispatch:
+    types: [run-patching-job]
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.client_payload.branch }}
+
+      - name: Install Ansible
+        run: sudo apt-get update && sudo apt-get install -y ansible
+
+      - name: Create Inventory File
+        run: echo -e "${{ github.event.client_payload.inventory }}" > inventory.ini
+
+      - name: Create SSH Key File
+        id: ssh_key
+        run: |
+          KEY_DIR=$(mktemp -d)
+          echo -e "${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}" > "$KEY_DIR/id_rsa"
+          chmod 600 "$KEY_DIR/id_rsa"
+          echo "key_path=$KEY_DIR/id_rsa" >> $GITHUB_OUTPUT
+
+      - name: Run Ansible Playbook
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          ansible-playbook -i inventory.ini \
+            "${{ github.event.client_payload.playbook_path }}" \
+            --private-key ${{ steps.ssh_key.outputs.key_path }}
