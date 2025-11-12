@@ -1,0 +1,46 @@
+name: Run Patching Playbook
+
+on:
+  repository_dispatch:
+    types: [run-patching]
+
+jobs:
+  run-playbook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.client_payload.branch }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Ansible and dependencies
+        run: |
+          pip install ansible
+          pip install pywinrm
+
+      - name: Run Ansible Playbook for Linux
+        if: github.event.client_payload.os_type == 'Linux'
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          ansible-playbook -i "${{ github.event.client_payload.inventory }}," \
+            "${{ github.event.client_payload.playbook_path }}" \
+            --user ${{ github.event.client_payload.ssh_user }} \
+            --private-key <(echo "${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}")
+
+      - name: Run Ansible Playbook for Windows
+        if: github.event.client_payload.os_type == 'Windows'
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          ansible-playbook -i "${{ github.event.client_payload.inventory }}," \
+            "${{ github.event.client_payload.playbook_path }}" \
+            -e "ansible_user=${{ github.event.client_payload.win_user }}" \
+            -e "ansible_password=${{ secrets.WINDOWS_ADMIN_PASSWORD }}" \
+            -e "ansible_connection=winrm" \
+            -e "ansible_winrm_server_cert_validation=ignore"
