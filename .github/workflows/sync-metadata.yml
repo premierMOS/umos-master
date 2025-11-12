@@ -146,9 +146,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Add any of the files that were created
-          git add "$TF_DIR/instance.sg" "$TF_DIR/instance.nsg" "$TF_DIR/instance.tags"
-          
+          # Add any of the files that were created, ignoring errors if they don't exist
+          if [ -f "$TF_DIR/instance.sg" ]; then git add "$TF_DIR/instance.sg"; fi
+          if [ -f "$TF_DIR/instance.nsg" ]; then git add "$TF_DIR/instance.nsg"; fi
+          if [ -f "$TF_DIR/instance.tags" ]; then git add "$TF_DIR/instance.tags"; fi
+
           if ! git diff --staged --quiet; then
             git commit -m "ci: Sync networking metadata for ${{ github.event.client_payload.instance_name }}"
             git pull --rebase origin "$BRANCH"
