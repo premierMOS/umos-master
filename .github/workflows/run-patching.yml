@@ -23,6 +23,15 @@ jobs:
           pip install ansible
           pip install pywinrm
 
+      - name: Write Ansible SSH Key
+        if: github.event.client_payload.os_type == 'Linux'
+        id: write_key
+        run: |
+          KEY_FILE=$(mktemp)
+          echo "${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}" > $KEY_FILE
+          chmod 600 $KEY_FILE
+          echo "key_path=$KEY_FILE" >> $GITHUB_OUTPUT
+
       - name: Run Ansible Playbook for Linux
         if: github.event.client_payload.os_type == 'Linux'
         env:
@@ -31,7 +40,7 @@ jobs:
           ansible-playbook -i "${{ github.event.client_payload.inventory }}," \
             "${{ github.event.client_payload.playbook_path }}" \
             --user ${{ github.event.client_payload.ssh_user }} \
-            --private-key <(echo "${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}")
+            --private-key ${{ steps.write_key.outputs.key_path }}
 
       - name: Run Ansible Playbook for Windows
         if: github.event.client_payload.os_type == 'Windows'
