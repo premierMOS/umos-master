@@ -28,7 +28,7 @@ jobs:
         id: write_key
         run: |
           KEY_FILE=$(mktemp)
-          echo "${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}" > $KEY_FILE
+          printf '%s\n' "${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}" > $KEY_FILE
           chmod 600 $KEY_FILE
           echo "key_path=$KEY_FILE" >> $GITHUB_OUTPUT
 
