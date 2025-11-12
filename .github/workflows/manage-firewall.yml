@@ -94,9 +94,9 @@ jobs:
           fi
 
           if [ "$ACTION" == "add" ]; then
-            aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol "$PROTOCOL" --from-port "$FROM_PORT" --to-port "$TO_PORT" --cidr "$SOURCE_CIDR"
+            aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol "$PROTOCOL" --port "$PORT_RANGE" --cidr "$SOURCE_CIDR"
           elif [ "$ACTION" == "remove" ]; then
-            aws ec2 revoke-security-group-ingress --group-id "$SG_ID" --protocol "$PROTOCOL" --from-port "$FROM_PORT" --to-port "$TO_PORT" --cidr "$SOURCE_CIDR"
+            aws ec2 revoke-security-group-ingress --group-id "$SG_ID" --protocol "$PROTOCOL" --port "$PORT_RANGE" --cidr "$SOURCE_CIDR"
           fi
       
       - name: Manage Azure NSG Rule
@@ -108,11 +108,11 @@ jobs:
           RULE_NAME="${{ github.event.client_payload.rule_name }}"
           
           if [ "$ACTION" == "add" ]; then
-            START_PORT=$(echo ${{ github.event.client_payload.port_range }} | cut -d'-' -f1)
-            PRIORITY=$((2000 + START_PORT))
+            # Generate a pseudo-random priority to avoid collisions
+            PRIORITY=$((2000 + `od -An -N2 -i /dev/urandom` % 2000))
             az network nsg rule create --resource-group "$RG_NAME" --nsg-name "$NSG_NAME" --name "$RULE_NAME" --priority "$PRIORITY" --protocol "${{ github.event.client_payload.protocol }}" --destination-port-ranges "${{ github.event.client_payload.port_range }}" --source-address-prefixes "${{ github.event.client_payload.source }}" --access Allow --direction Inbound
           elif [ "$ACTION" == "remove" ]; then
-            az network nsg rule delete --resource-group "$RG_NAME" --nsg-name "$NSG_NAME" --name "$RULE_NAME" --no-wait
+            az network nsg rule delete --resource-group "$RG_NAME" --nsg-name "$NSG_NAME" --name "$RULE_NAME"
           fi
 
       - name: Manage GCP Firewall Rule
@@ -120,8 +120,7 @@ jobs:
         run: |
           ACTION="${{ github.event.client_payload.action }}"
           PROJECT_ID="${{ github.event.client_payload.project_id }}"
-          NETWORK_TAGS_JSON='${{ github.event.client_payload.network_tags }}'
-          NETWORK_TAGS=$(echo "$NETWORK_TAGS_JSON" | jq -r 'join(",")')
+          NETWORK_TAGS="${{ github.event.client_payload.network_tags }}"
           RULE_NAME="${{ github.event.client_payload.rule_name }}"
           
           if [ "$ACTION" == "add" ]; then
