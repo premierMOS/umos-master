@@ -1,0 +1,19 @@
+---
+- name: Apply security updates to Linux servers
+  hosts: all
+  become: yes
+  tasks:
+    - name: Update APT cache and apply security upgrades (Debian/Ubuntu)
+      ansible.builtin.apt:
+        update_cache: yes
+        only_upgrade: yes
+        security: yes
+        autoclean: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Apply security updates (RHEL/CentOS/Fedora)
+      ansible.builtin.yum:
+        name: '*'
+        state: latest
+        security: yes
+      when: ansible_os_family == "RedHat"
