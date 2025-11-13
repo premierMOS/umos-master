@@ -64,27 +64,45 @@ jobs:
           echo "SSM Command sent with ID: $COMMAND_ID"
           echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
 
-      - name: Wait for SSM Command to Complete and Check Status
+      - name: Poll SSM Command and Check Status
         run: |
           INSTANCE_IDS_JSON='${{ github.event.client_payload.instance_ids_json }}'
           COMMAND_ID='${{ steps.ssm_command.outputs.command_id }}'
           
-          # Wait a few seconds for command to start propagating
-          echo "Waiting for command to register..."
-          sleep 10 
-
+          sleep 5 # Brief wait for command to be sent
+          
           for id in $(echo "$INSTANCE_IDS_JSON" | jq -r '.[]'); do
-            echo "Waiting for command to complete on instance $id..."
-            aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$id"
+            echo "Polling SSM command status for instance $id..."
             
-            echo "Checking final status for instance $id..."
-            STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$id" --query "Status" --output text)
+            # Poll for up to 10 minutes (60 attempts * 10 seconds)
+            for i in $(seq 1 60); do
+              STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$id" --query "Status" --output text)
+              
+              if [[ "$STATUS" == "Success" || "$STATUS" == "Failed" || "$STATUS" == "TimedOut" || "$STATUS" == "Cancelled" ]]; then
+                echo "Command reached terminal state: $STATUS"
+                break
+              fi
+              
+              if [ "$i" -eq 60 ]; then
+                echo "::error::Polling timed out after 10 minutes. Final status: $STATUS"
+                STATUS="TimedOut" # Force status to a failure state
+                break
+              fi
+
+              echo "Current status: $STATUS. Waiting... (Attempt $i/60)"
+              sleep 10
+            done
+            
             if [ "$STATUS" != "Success" ]; then
               echo "::error::SSM command failed on instance $id with status: $STATUS"
-              # Get output for debugging
-              aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$id"
+              echo "--- Standard Output ---"
+              aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$id" --query "StandardOutputContent" --output text
+              echo "--- Standard Error ---"
+              aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$id" --query "StandardErrorContent" --output text
+              echo "------------------------"
               exit 1
             fi
-            echo "Instance $id completed successfully."
+            
+            echo "Instance $id patched successfully."
           done
           echo "All instances completed successfully."
