@@ -1,17 +1,26 @@
 name: Run Ansible Playbook
 
 on:
-  repository_dispatch:
-    types: [run-ansible-playbook]
-
+  workflow_dispatch:
+    inputs:
+      playbook_path:
+        description: 'Path to the ansible playbook file in the repository'
+        required: true
+      target_ip:
+        description: 'The IP address of the target instance'
+        required: true
+      ssh_user:
+        description: 'The SSH user for the target instance'
+        required: true
+      terraform_directory:
+        description: 'Path to the terraform directory for the instance'
+        required: true
 jobs:
   run-playbook:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-        with:
-          ref: ${{ github.event.client_payload.branch }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -26,7 +35,7 @@ jobs:
       - name: Extract SSH key from Terraform state
         id: ssh_key_setup
         env:
-          TF_DIR: ${{ github.event.client_payload.terraform_directory }}
+          TF_DIR: ${{ github.event.inputs.terraform_directory }}
         run: |
           TF_STATE_FILE="$TF_DIR/terraform.tfstate"
 
@@ -45,14 +54,14 @@ jobs:
           KEY_DIR=$(mktemp -d)
           echo "$SSH_PRIVATE_KEY" > "$KEY_DIR/id_rsa"
           chmod 600 "$KEY_DIR/id_rsa"
-          ssh-keyscan -H ${{ github.event.client_payload.target_ip }} >> "$KEY_DIR/known_hosts"
+          ssh-keyscan -H ${{ github.event.inputs.target_ip }} >> "$KEY_DIR/known_hosts"
           echo "key_path=$KEY_DIR/id_rsa" >> $GITHUB_OUTPUT
           echo "known_hosts_path=$KEY_DIR/known_hosts" >> $GITHUB_OUTPUT
 
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook -i "${{ github.event.client_payload.target_ip }}," \
-            "${{ github.event.client_payload.playbook_path }}" \
-            --user ${{ github.event.client_payload.ssh_user }} \
+          ansible-playbook -i "${{ github.event.inputs.target_ip }}," \
+            "${{ github.event.inputs.playbook_path }}" \
+            --user ${{ github.event.inputs.ssh_user }} \
             --private-key ${{ steps.ssh_key_setup.outputs.key_path }} \
             --extra-vars "ansible_ssh_common_args='-o UserKnownHostsFile=${{ steps.ssh_key_setup.outputs.known_hosts_path }}'"
