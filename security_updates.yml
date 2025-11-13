@@ -9,9 +9,9 @@
         cache_valid_time: 3600
       when: ansible_os_family == "Debian"
 
-    - name: Update security packages (RHEL/CentOS/Fedora)
+    - name: Update security packages (RHEL/CentOS/Fedora/Amazon)
       yum:
-        name: '*'
+        name: "*"
         state: latest
         security: yes
-      when: ansible_os_family == "RedHat"
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Amazon"
