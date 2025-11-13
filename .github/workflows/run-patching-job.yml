@@ -3,26 +3,21 @@ name: Run Patching Job
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        required: true
       platform:
         required: true
-      instance_ids:
-        required: false
       instance_ids_json:
         required: true
-      ssm_parameters:
-        required: false
+      instance_ids: # For AWS CLI
+      ssm_parameters: # For AWS CLI
       aws_role_arn:
-        required: false
       region:
-        required: false
-      script_content:
-        required: false
-      resource_group:
-        required: false
-      azure_credentials:
-        required: false
+      script_content: # For Azure CLI
+      resource_group: # For Azure CLI
+      azure_credentials: # For Azure CLI
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   patch:
