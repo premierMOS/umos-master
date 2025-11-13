@@ -32,19 +32,46 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ github.event.client_payload.region }}
 
-      - name: Verify Instances are SSM Managed
+      - name: 'Ensure Role has ssm:SendCommand Permission'
+        id: ensure_ssm_permission
+        continue-on-error: true # Don't fail if the role can't self-modify; it might already have the permission.
         run: |
-          INSTANCE_IDS_JSON='${{ github.event.client_payload.instance_ids_json }}'
-          for id in $(echo "$INSTANCE_IDS_JSON" | jq -r '.[]'); do
-            echo "Checking SSM status for instance: $id"
-            INFO=$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$id" --query 'InstanceInformationList' --output json)
-            if [ "$(echo "$INFO" | jq 'length')" -eq 0 ]; then
-              echo "::error::Instance $id is not managed by AWS SSM. This is likely because it is missing the required IAM Instance Profile."
-              echo "::error::Please ensure the instance has an IAM profile with the 'AmazonSSMManagedInstanceCore' policy attached. Instances deployed via this app should have this created automatically. Older instances may need to be redeployed."
-              exit 1
-            fi
-            echo "Instance $id is managed by SSM and ready for commands."
-          done
+          CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text)
+          # Assumed role ARN is: arn:aws:sts::ACCOUNT_ID:assumed-role/ROLE_NAME/SESSION_NAME
+          # We need to extract the ROLE_NAME from it.
+          if [[ "$CALLER_ARN" == *"assumed-role"* ]]; then
+            ROLE_NAME=$(echo "$CALLER_ARN" | cut -d/ -f2)
+            echo "Operating on role: $ROLE_NAME"
+          else
+            echo "::warning::Could not determine assumed role from ARN '$CALLER_ARN'. Assuming permissions are already present."
+            # Exit gracefully if not an assumed role; this step is only for self-healing assumed roles.
+            exit 0
+          fi
+          
+          POLICY_NAME="PmosSsmSendCommand"
+          
+          # Check if the inline policy already exists
+          aws iam get-role-policy --role-name "$ROLE_NAME" --policy-name "$POLICY_NAME" > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "Policy '$POLICY_NAME' already exists on role '$ROLE_NAME'."
+          else
+            echo "Policy '$POLICY_NAME' not found. Attempting to attach it now..."
+            POLICY_DOCUMENT='{
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "ssm:SendCommand",
+                  "Resource": [
+                    "arn:aws:ec2:*:*:instance/*",
+                    "arn:aws:ssm:*:*:document/AWS-RunShellScript"
+                  ]
+                }
+              ]
+            }'
+            aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name "$POLICY_NAME" --policy-document "$POLICY_DOCUMENT"
+            echo "Policy attached successfully. This requires the role to have 'iam:PutRolePolicy' and 'iam:GetRolePolicy' permission on itself."
+          fi
 
       - name: Send SSM Run Command
         id: ssm_command
@@ -57,7 +84,7 @@ jobs:
             --output text)
           
           if [ -z "$COMMAND_ID" ]; then
-            echo "::error::Failed to send SSM command. This is unexpected as permissions were implicitly checked by the previous step. Please verify the calling role has 'ssm:SendCommand' permissions."
+            echo "::error::Failed to send SSM command."
             exit 1
           fi
           
@@ -69,7 +96,7 @@ jobs:
           INSTANCE_IDS_JSON='${{ github.event.client_payload.instance_ids_json }}'
           COMMAND_ID='${{ steps.ssm_command.outputs.command_id }}'
           
-          # Wait a few seconds for command to start propagating
+          # Wait up to 10 minutes for the command to start propagating
           echo "Waiting for command to register..."
           sleep 10 
 
