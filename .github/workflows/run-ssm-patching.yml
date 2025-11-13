@@ -32,6 +32,47 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ github.event.client_payload.region }}
 
+      - name: 'Ensure Role has ssm:SendCommand Permission'
+        id: ensure_ssm_permission
+        continue-on-error: true # Don't fail if the role can't self-modify; it might already have the permission.
+        run: |
+          CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text)
+          # Assumed role ARN is: arn:aws:sts::ACCOUNT_ID:assumed-role/ROLE_NAME/SESSION_NAME
+          # We need to extract the ROLE_NAME from it.
+          if [[ "$CALLER_ARN" == *"assumed-role"* ]]; then
+            ROLE_NAME=$(echo "$CALLER_ARN" | cut -d/ -f2)
+            echo "Operating on role: $ROLE_NAME"
+          else
+            echo "::warning::Could not determine assumed role from ARN '$CALLER_ARN'. Assuming permissions are already present."
+            # Exit gracefully if not an assumed role; this step is only for self-healing assumed roles.
+            exit 0
+          fi
+          
+          POLICY_NAME="PmosSsmSendCommand"
+          
+          # Check if the inline policy already exists
+          aws iam get-role-policy --role-name "$ROLE_NAME" --policy-name "$POLICY_NAME" > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "Policy '$POLICY_NAME' already exists on role '$ROLE_NAME'."
+          else
+            echo "Policy '$POLICY_NAME' not found. Attempting to attach it now..."
+            POLICY_DOCUMENT='{
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "ssm:SendCommand",
+                  "Resource": [
+                    "arn:aws:ec2:*:*:instance/*",
+                    "arn:aws:ssm:*:*:document/AWS-RunShellScript"
+                  ]
+                }
+              ]
+            }'
+            aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name "$POLICY_NAME" --policy-document "$POLICY_DOCUMENT"
+            echo "Policy attached successfully. This requires the role to have 'iam:PutRolePolicy' and 'iam:GetRolePolicy' permission on itself."
+          fi
+
       - name: Send SSM Run Command
         id: ssm_command
         run: |
