@@ -1,0 +1,58 @@
+name: Run Ansible Playbook
+
+on:
+  repository_dispatch:
+    types: [run-ansible-playbook]
+
+jobs:
+  run-playbook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.client_payload.branch }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Ansible and jq
+        run: |
+          pip install ansible
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Extract SSH key from Terraform state
+        id: ssh_key_setup
+        env:
+          TF_DIR: ${{ github.event.client_payload.terraform_directory }}
+        run: |
+          TF_STATE_FILE="$TF_DIR/terraform.tfstate"
+
+          if [ ! -f "$TF_STATE_FILE" ]; then
+            echo "::error::Terraform state file not found at $TF_STATE_FILE. Cannot retrieve SSH key."
+            exit 1
+          fi
+
+          SSH_PRIVATE_KEY=$(jq -r '.outputs.private_ssh_key.value' "$TF_STATE_FILE")
+
+          if [ -z "$SSH_PRIVATE_KEY" ] || [ "$SSH_PRIVATE_KEY" == "null" ]; then
+            echo "::error::private_ssh_key not found in Terraform state outputs. This instance may be Windows or was deployed without an SSH key."
+            exit 1
+          fi
+          
+          KEY_DIR=$(mktemp -d)
+          echo "$SSH_PRIVATE_KEY" > "$KEY_DIR/id_rsa"
+          chmod 600 "$KEY_DIR/id_rsa"
+          ssh-keyscan -H ${{ github.event.client_payload.target_ip }} >> "$KEY_DIR/known_hosts"
+          echo "key_path=$KEY_DIR/id_rsa" >> $GITHUB_OUTPUT
+          echo "known_hosts_path=$KEY_DIR/known_hosts" >> $GITHUB_OUTPUT
+
+      - name: Run Ansible Playbook
+        run: |
+          ansible-playbook -i "${{ github.event.client_payload.target_ip }}," \
+            "${{ github.event.client_payload.playbook_path }}" \
+            --user ${{ github.event.client_payload.ssh_user }} \
+            --private-key ${{ steps.ssh_key_setup.outputs.key_path }} \
+            --extra-vars "ansible_ssh_common_args='-o UserKnownHostsFile=${{ steps.ssh_key_setup.outputs.known_hosts_path }}'"
