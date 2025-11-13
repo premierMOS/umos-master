@@ -7,13 +7,21 @@ on:
         required: true
       instance_ids_json:
         required: true
-      instance_ids: # For AWS CLI
-      ssm_parameters: # For AWS CLI
+      # Common
+      script_content:
+      # AWS specific
+      instance_ids:
+      ssm_parameters:
       aws_role_arn:
       region:
-      script_content: # For Azure CLI
-      resource_group: # For Azure CLI
-      azure_credentials: # For Azure CLI
+      # Azure specific
+      resource_group:
+      azure_credentials:
+      # GCP specific
+      project_id:
+      zone:
+      gcp_key_path:
+      gcp_credentials_json:
 
 permissions:
   id-token: write
@@ -23,6 +31,9 @@ jobs:
   patch:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
       - name: 'Debug: Show Webhook Payload'
         run: |
           echo "Platform: ${{ github.event.inputs.platform }}"
@@ -144,3 +155,47 @@ jobs:
             echo "--- Successfully ran command on $name ---"
           done
           echo "All Azure instances processed."
+
+      # --- GCP Steps ---
+      - name: 'Load GCP Service Account Key from file'
+        if: github.event.inputs.platform == 'gcp' && github.event.inputs.gcp_key_path
+        id: gcp_creds_from_file
+        run: |
+          echo "Loading credentials from ${{ github.event.inputs.gcp_key_path }}"
+          CRED_JSON=$(cat "${{ github.event.inputs.gcp_key_path }}")
+          {
+            echo 'gcp_credentials_json<<EOF'
+            echo "$CRED_JSON"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        if: github.event.inputs.platform == 'gcp'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: ${{ steps.gcp_creds_from_file.outputs.gcp_credentials_json || github.event.inputs.gcp_credentials_json }}
+
+      - name: Run GCP VM Command for each instance
+        if: github.event.inputs.platform == 'gcp'
+        run: |
+          INSTANCE_NAMES_JSON='${{ github.event.inputs.instance_ids_json }}'
+          SCRIPT_CONTENT='${{ github.event.inputs.script_content }}'
+          PROJECT_ID='${{ github.event.inputs.project_id }}'
+          ZONE='${{ github.event.inputs.zone }}'
+
+          # Ensure IAP-secured SSH helper is not used, which can cause interactive prompts
+          gcloud config set compute/ssh_helpers false
+
+          for name in $(echo "$INSTANCE_NAMES_JSON" | jq -r '.[]'); do
+            echo "--- Running command on GCP VM: $name ---"
+            
+            # Use --command flag to execute script on the remote instance
+            gcloud compute ssh "$name" --project "$PROJECT_ID" --zone "$ZONE" --command "$SCRIPT_CONTENT"
+              
+            if [ $? -ne 0 ]; then
+                echo "::error::Run Command failed on instance $name. See output above for details."
+                exit 1
+            fi
+            echo "--- Successfully ran command on $name ---"
+          done
+          echo "All GCP instances processed."
