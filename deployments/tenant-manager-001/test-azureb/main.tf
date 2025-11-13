@@ -1,27 +1,26 @@
-# Terraform block specifies required providers and their versions
-terraform {
-  required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 3.0"
-    }
-    tls = {
-      source  = "hashicorp/tls"
-      version = "~> 4.0"
-    }
-  }
-}
-
-# Configure the Microsoft Azure Provider
-# CRITICAL: `skip_provider_registration` and `features {}` are required for this environment.
+# Configure the Azure Provider
+# This provider block configures Terraform to manage resources in Azure.
+# The subscription ID is pulled from a variable to ensure consistent deployment
+# across environments. 'skip_provider_registration' is set to true as per
+# environment requirements to prevent permission errors.
 provider "azurerm" {
+  features {}
   subscription_id        = var.subscription_id
-  skip_provider_registration = true # CRITICAL: Disable automatic resource provider registration
-  features {} # CRITICAL: Required for this environment to prevent permissions errors
+  skip_provider_registration = true
 }
 
-#region Variables
-# CRITICAL: All variables MUST include a 'default' value set directly from the provided configuration.
+# Configure the TLS Provider
+# This provider is used to generate a local SSH key pair for secure access
+# to Linux virtual machines.
+provider "tls" {
+  # No special configuration needed for TLS provider
+}
+
+# --- Input Variables ---
+# All key configuration values are declared as variables with default values
+# directly from the provided JSON configuration. This prevents interactive
+# prompts and ensures the script is ready to use out-of-the-box.
+
 variable "instance_name" {
   description = "The name of the virtual machine instance."
   type        = string
@@ -29,25 +28,25 @@ variable "instance_name" {
 }
 
 variable "region" {
-  description = "The Azure region where resources will be deployed."
+  description = "The Azure region where the resources will be deployed."
   type        = string
   default     = "East US"
 }
 
 variable "vm_size" {
-  description = "The size of the virtual machine."
+  description = "The size/SKU of the virtual machine."
   type        = string
   default     = "Standard_B1s"
 }
 
 variable "tenant_id" {
-  description = "Unique identifier for the tenant, used for resource naming to ensure isolation."
+  description = "A unique identifier for the tenant, used in naming conventions for tenant-isolated resources."
   type        = string
   default     = "tenant-manager-001"
 }
 
 variable "custom_script" {
-  description = "A custom script to run on the VM at startup (user data)."
+  description = "A custom script to be executed on the VM after provisioning (user data)."
   type        = string
   default     = "#!/bin/bash\n# User data scripts are not yet supported for direct deployment.\n"
 }
@@ -59,125 +58,129 @@ variable "azure_resource_group" {
 }
 
 variable "subscription_id" {
-  description = "The Azure Subscription ID to deploy resources into."
+  description = "The Azure Subscription ID where resources will be deployed."
   type        = string
   default     = "c0ddf8f4-14b2-432e-b2fc-dd8456adda33"
 }
-#endregion
 
-#region Data Sources for Existing Resources
-# CRITICAL: Use a data source for the Azure Resource Group as it is assumed to already exist.
+variable "os_image_name" {
+  description = "The exact name of the custom OS image to use for the virtual machine."
+  type        = string
+  default     = "ubuntu-22-04-19340995664"
+}
+
+# --- Data Sources ---
+
+# Data source for the existing Azure Resource Group.
+# The resource group is assumed to exist and is looked up using its name.
 data "azurerm_resource_group" "rg" {
   name = var.azure_resource_group
 }
 
-# CRITICAL AZURE NETWORKING & TENANT ISOLATION: Data source to query for an existing VNet for tenant isolation.
-# This data source does not fail when no resources are found.
-data "azurerm_resources" "existing_vnet_query" {
-  type                = "Microsoft.Network/virtualNetworks"
-  resource_group_name = data.azurerm_resource_group.rg.name
+# Data source to check for an existing Virtual Network (VNet) for the tenant.
+# This is part of the "get-or-create" pattern for tenant isolation.
+data "azurerm_virtual_network" "existing_vnet" {
   name                = "pmos-tenant-${var.tenant_id}-vnet"
-}
-
-# CRITICAL AZURE NETWORKING & TENANT ISOLATION: Data source to query for an existing Network Security Group for tenant isolation.
-# This data source does not fail when no resources are found.
-data "azurerm_resources" "existing_nsg_query" {
-  type                = "Microsoft.Network/networkSecurityGroups"
   resource_group_name = data.azurerm_resource_group.rg.name
+  # CRITICAL ANTI-CYCLE: FORBIDDEN from referencing 'local' variables here.
+  # Arguments constructed directly from variables or other data sources.
+}
+
+# Data source to check for an existing Network Security Group (NSG) for the tenant.
+# This is part of the "get-or-create" pattern for tenant isolation.
+data "azurerm_network_security_group" "existing_nsg" {
   name                = "pmos-tenant-${var.tenant_id}-nsg"
+  resource_group_name = data.azurerm_resource_group.rg.name
+  # CRITICAL ANTI-CYCLE: FORBIDDEN from referencing 'local' variables here.
+  # Arguments constructed directly from variables or other data sources.
 }
-#endregion
 
-#region Locals
-# CRITICAL AZURE NETWORKING & TENANT ISOLATION: Local variables to select the VNet ID and name based on whether it was found or created.
+# --- Locals Block ---
+# A locals block is used to conditionally select IDs/names based on whether
+# existing resources were found or new ones were created, ensuring a seamless
+# "get-or-create" pattern.
+
 locals {
-  vnet_id = length(data.azurerm_resources.existing_vnet_query.resources) > 0 ? data.azurerm_resources.existing_vnet_query.resources[0].id : azurerm_virtual_network.tenant_vnet[0].id
-  vnet_name = length(data.azurerm_resources.existing_vnet_query.resources) > 0 ? data.azurerm_resources.existing_vnet_query.resources[0].name : azurerm_virtual_network.tenant_vnet[0].name
-  nsg_id = length(data.azurerm_resources.existing_nsg_query.resources) > 0 ? data.azurerm_resources.existing_nsg_query.resources[0].id : azurerm_network_security_group.tenant_nsg[0].id
-}
-#endregion
+  # Selects the VNet ID: either from the existing data source or the newly created resource.
+  vnet_id = length(data.azurerm_virtual_network.existing_vnet.id) > 0 ? data.azurerm_virtual_network.existing_vnet.id : azurerm_virtual_network.tenant_vnet[0].id
 
-#region SSH Key Generation
-# CRITICAL FOR LINUX DEPLOYMENTS: Generate an SSH key pair for secure access to the VM.
+  # Selects the VNet name: either from the existing data source or the newly created resource.
+  vnet_name = length(data.azurerm_virtual_network.existing_vnet.id) > 0 ? data.azurerm_virtual_network.existing_vnet.name : azurerm_virtual_network.tenant_vnet[0].name
+
+  # Selects the NSG ID: either from the existing data source or the newly created resource.
+  nsg_id = length(data.azurerm_network_security_group.existing_nsg.id) > 0 ? data.azurerm_network_security_group.existing_nsg.id : azurerm_network_security_group.tenant_nsg[0].id
+}
+
+# --- Resources ---
+
+# Resource for generating an SSH private key locally.
+# This key is used to authenticate with the Linux virtual machine.
 resource "tls_private_key" "admin_ssh" {
   algorithm = "RSA"
   rsa_bits  = 4096
-  # CRITICAL: The 'comment' argument is FORBIDDEN in this resource block.
+  # CRITICAL: 'comment' argument is FORBIDDEN for tls_private_key.
 }
-#endregion
 
-#region Azure Network Resources
-# CRITICAL AZURE NETWORKING & TENANT ISOLATION: Conditionally create the Virtual Network if the query finds no existing VNet.
+# Conditional creation of a Virtual Network (VNet) for tenant isolation.
+# This resource is created only if an existing VNet for the tenant is not found.
 resource "azurerm_virtual_network" "tenant_vnet" {
-  count               = length(data.azurerm_resources.existing_vnet_query.resources) == 0 ? 1 : 0
-  name                = "pmos-tenant-${var.tenant_id}-vnet"
-  location            = data.azurerm_resource_group.rg.location
-  resource_group_name = data.azurerm_resource_group.rg.name
-  address_space       = ["10.0.0.0/16"] # Example address space for the VNet
+  count = length(data.azurerm_virtual_network.existing_vnet.id) > 0 ? 0 : 1
 
-  tags = {
-    tenant_id = var.tenant_id
-  }
+  name                = "pmos-tenant-${var.tenant_id}-vnet"
+  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
+  address_space       = ["10.0.0.0/16"] # Example address space
 }
 
-# CRITICAL AZURE NETWORKING & TENANT ISOLATION: Conditionally create the Network Security Group if the query finds no existing NSG.
+# Conditional creation of a Network Security Group (NSG) for tenant isolation.
+# This resource is created only if an existing NSG for the tenant is not found.
 resource "azurerm_network_security_group" "tenant_nsg" {
-  count               = length(data.azurerm_resources.existing_nsg_query.resources) == 0 ? 1 : 0
+  count = length(data.azurerm_network_security_group.existing_nsg.id) > 0 ? 0 : 1
+
   name                = "pmos-tenant-${var.tenant_id}-nsg"
   location            = data.azurerm_resource_group.rg.location
   resource_group_name = data.azurerm_resource_group.rg.name
 
-  # CRITICAL AZURE NETWORKING & TENANT ISOLATION: Security rule to allow SSH for Linux VMs.
+  # Security rule to allow SSH access from Azure's infrastructure.
   security_rule {
-    name                       = "AllowSSH" # For Linux, port 22
+    name                       = "AllowSSH_from_AzureCloud"
     priority                   = 1001
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
-    destination_port_range     = "22" # SSH port
-    source_address_prefix      = "Internet"
+    destination_port_range     = "22"
+    source_address_prefix      = "AzureCloud" # Specific Azure service tag
     destination_address_prefix = "*"
-  }
-
-  tags = {
-    tenant_id = var.tenant_id
   }
 }
 
-# CRITICAL AZURE NETWORKING & TENANT ISOLATION: Create a NEW subnet for THIS deployment.
+# Create a dedicated subnet for this virtual machine within the tenant's VNet.
 resource "azurerm_subnet" "this_subnet" {
   name                 = "${var.instance_name}-subnet"
   resource_group_name  = data.azurerm_resource_group.rg.name
   virtual_network_name = local.vnet_name
-  address_prefixes     = ["10.0.1.0/24"] # Example subnet prefix, assuming VNet 10.0.0.0/16
-
-  tags = {
-    instance_name = var.instance_name
-    tenant_id     = var.tenant_id
-  }
+  address_prefixes     = ["10.0.1.0/24"] # Unique subnet for this VM
 }
 
-# CRITICAL AZURE NETWORKING & TENANT ISOLATION: Associate the newly created subnet with the tenant's Network Security Group.
+# Associate the newly created subnet with the tenant's Network Security Group (NSG).
 resource "azurerm_subnet_network_security_group_association" "this_subnet_nsg_assoc" {
   subnet_id                 = azurerm_subnet.this_subnet.id
   network_security_group_id = local.nsg_id
 }
 
-# CRITICAL NETWORKING REQUIREMENT: Create a Public IP for the VM to ensure connectivity for management agents like AWS SSM.
+# Create an Azure Public IP address for the virtual machine.
+# This ensures connectivity for management agents, even with restrictive NSG rules.
 resource "azurerm_public_ip" "this_pip" {
   name                = "${var.instance_name}-pip"
-  location            = data.azurerm_resource_group.rg.location
   resource_group_name = data.azurerm_resource_group.rg.name
-  allocation_method   = "Dynamic" # Dynamic allocation for cost efficiency; Static for predictable IP
-
-  tags = {
-    instance_name = var.instance_name
-    tenant_id     = var.tenant_id
-  }
+  location            = data.azurerm_resource_group.rg.location
+  allocation_method   = "Static"
+  sku                 = "Standard" # Use Standard SKU for public IPs
 }
 
-# Create a Network Interface for the Virtual Machine.
+# Create an Azure Network Interface for the virtual machine.
+# It's attached to the dedicated subnet and associated with the public IP and NSG.
 resource "azurerm_network_interface" "this_nic" {
   name                = "${var.instance_name}-nic"
   location            = data.azurerm_resource_group.rg.location
@@ -185,81 +188,76 @@ resource "azurerm_network_interface" "this_nic" {
 
   ip_configuration {
     name                          = "internal"
-    subnet_id                     = azurerm_subnet.this_subnet.id # CRITICAL AZURE NETWORKING
+    subnet_id                     = azurerm_subnet.this_subnet.id
     private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = azurerm_public_ip.this_pip.id # CRITICAL NETWORKING REQUIREMENT
+    public_ip_address_id          = azurerm_public_ip.this_pip.id
   }
 
-  tags = {
-    instance_name = var.instance_name
-    tenant_id     = var.tenant_id
-  }
+  network_security_group_id = local.nsg_id
 }
-#endregion
 
-#region Virtual Machine Resource
-# Deploy the Virtual Machine.
-# CRITICAL: Name the primary compute resource "this_vm".
+# Deploy the Azure Linux Virtual Machine.
+# This is the primary compute resource, named "this_vm" as per instructions.
 resource "azurerm_linux_virtual_machine" "this_vm" {
-  name                = var.instance_name
-  resource_group_name = data.azurerm_resource_group.rg.name
-  location            = data.azurerm_resource_group.rg.location
-  size                = var.vm_size
-  admin_username      = "azureuser" # Standard admin user for Linux VMs
+  name                            = var.instance_name
+  resource_group_name             = data.azurerm_resource_group.rg.name
+  location                        = data.azurerm_resource_group.rg.location
+  size                            = var.vm_size
+  admin_username                  = "azureuser" # Standard admin username for Azure Linux VMs
 
-  # CRITICAL FOR LINUX DEPLOYMENTS: Attach the generated SSH public key for secure authentication.
+  # Attach the generated SSH public key for administrator access.
   admin_ssh_key {
     username   = "azureuser"
     public_key = tls_private_key.admin_ssh.public_key_openssh
   }
 
-  # CRITICAL IMAGE NAME INSTRUCTION: Use the exact custom image name provided.
-  # This image ID includes the subscription and resource group context.
-  source_image_id = "/subscriptions/${var.subscription_id}/resourceGroups/${data.azurerm_resource_group.rg.name}/providers/Microsoft.Compute/images/ubuntu-22-04-19252758120"
-
+  # Configure the OS disk for the virtual machine.
   os_disk {
     caching              = "ReadWrite"
     storage_account_type = "Standard_LRS"
-    disk_size_gb         = 30 # Default disk size for the OS disk
   }
 
-  # CRITICAL: Attach the network interface to the VM.
-  network_interface_ids = [azurerm_network_interface.this_nic.id]
+  # Define the source image for the VM.
+  # CRITICAL: Uses the exact, full custom image ID as specified.
+  source_image_id = "/subscriptions/${var.subscription_id}/resourceGroups/${data.azurerm_resource_group.rg.name}/providers/Microsoft.Compute/images/${var.os_image_name}"
 
-  # USER DATA/CUSTOM SCRIPT: Pass the custom script as custom_data, base64 encoded.
+  # Attach the network interface to the VM.
+  network_interface_ids = [
+    azurerm_network_interface.this_nic.id,
+  ]
+
+  # Pass custom data (user data) to the VM for post-provisioning scripts.
+  # The script is base64 encoded for Azure.
   custom_data = base64encode(var.custom_script)
 
-  # CRITICAL AZURE VM ARGUMENT: Enable serial console for Linux VMs for debugging.
+  # Enable boot diagnostics for serial console access.
   boot_diagnostics {}
 
-  # CRITICAL AZURE VM ARGUMENT INSTRUCTION: The 'azurerm_linux_virtual_machine' resource DOES NOT support a top-level 'enabled' argument.
-
-  tags = {
-    instance_name = var.instance_name
-    tenant_id     = var.tenant_id
-    os_type       = "Linux"
-  }
+  # CRITICAL: FORBIDDEN from adding 'enabled' argument directly within this resource block.
 }
-#endregion
 
-#region Outputs
-# CRITICAL: Output block named "private_ip" exposes the private IP address of the created virtual machine.
+
+# --- Outputs ---
+
+# Output the private IP address of the created virtual machine.
+# This is useful for internal network access or management.
 output "private_ip" {
-  description = "The private IP address of the deployed virtual machine."
+  description = "The private IP address of the VM."
   value       = azurerm_network_interface.this_nic.private_ip_address
 }
 
-# CRITICAL: Output block named "instance_id" exposes the cloud provider's native instance ID.
+# Output the cloud provider's native instance ID of the virtual machine.
+# This ID is unique and can be used for direct API calls or cloud console lookups.
 output "instance_id" {
-  description = "The unique ID of the virtual machine within the cloud provider."
+  description = "The Azure ID of the virtual machine."
   value       = azurerm_linux_virtual_machine.this_vm.id
 }
 
-# CRITICAL FOR LINUX DEPLOYMENTS: Output block named "private_ssh_key" exposes the generated private key.
-# This output MUST be marked as sensitive.
+# Output the generated SSH private key.
+# CRITICAL: This output is marked as sensitive to prevent its value from being
+# displayed in plaintext in Terraform logs. It should be stored securely.
 output "private_ssh_key" {
-  description = "The generated private SSH key for accessing the VM."
+  description = "The generated SSH private key (sensitive)."
   value       = tls_private_key.admin_ssh.private_key_pem
   sensitive   = true
 }
-#endregion
