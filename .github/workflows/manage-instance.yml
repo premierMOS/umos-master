@@ -129,19 +129,19 @@ jobs:
         run: |
           gcloud compute instances ${{ github.event.client_payload.action }} ${{ github.event.client_payload.instance_name }} \
             --project=${{ steps.gcp_auth.outputs.project_id }} \
-            --zone=${{ github.event.client_payload.region }} \
+            --zone=${{ github.event.client_payload.region }}-a \
             --quiet
 
       - name: Start/Stop AWS EC2 Instance
         if: github.event.client_payload.platform == 'aws' && github.event.client_payload.action != 'delete'
         run: |
-          INSTANCE_ID="${{ github.event.client_payload.cloud_instance_id }}"
-          if [ -z "$INSTANCE_ID" ]; then
-            echo "::error::Cloud Instance ID is required for start/stop actions."
+          INSTANCE_IDS=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=${{ github.event.client_payload.instance_name }}" "Name=instance-state-name,Values=pending,running,shutting-down,stopped,stopping" --query 'Reservations[].Instances[].InstanceId' --output text)
+          if [ -z "$INSTANCE_IDS" ]; then
+            echo "Instance named '${{ github.event.client_payload.instance_name }}' not found."
             exit 1
           fi
           ACTION="${{ github.event.client_payload.action }}"
-          aws ec2 ${ACTION}-instances --instance-ids $INSTANCE_ID
+          aws ec2 ${ACTION}-instances --instance-ids $INSTANCE_IDS
 
       - name: Start/Stop Azure VM
         if: github.event.client_payload.platform == 'azure' && github.event.client_payload.action != 'delete'
