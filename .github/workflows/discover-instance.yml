@@ -1,0 +1,75 @@
+name: Discover Instance Packages
+
+on:
+  repository_dispatch:
+    types: [discover-instance]
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.client_payload.branch }}
+
+      - name: Configure AWS Credentials
+        if: github.event.client_payload.platform == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ github.event.client_payload.aws_role_arn }}
+          aws-region: ${{ github.event.client_payload.region }}
+
+      - name: Discover AWS Packages via SSM
+        if: github.event.client_payload.platform == 'aws'
+        id: discover_aws
+        run: |
+          INSTANCE_ID="${{ github.event.client_payload.instance_id }}"
+          # A script to detect package manager and list packages
+          DISCOVERY_SCRIPT="
+          if command -v dpkg &> /dev/null; then
+            dpkg-query -W -f='\${Package}\
+'
+          elif command -v rpm &> /dev/null; then
+            rpm -qa
+          else
+            echo 'Unsupported package manager'
+          fi"
+          
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$INSTANCE_ID" \
+            --parameters "commands='$DISCOVERY_SCRIPT'" \
+            --query "Command.CommandId" --output text)
+            
+          # Poll for command completion
+          sleep 5
+          for i in {1..30}; do
+            STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "Status" --output text)
+            if [[ "$STATUS" == "Success" || "$STATUS" == "Failed" ]]; then
+              break
+            fi
+            sleep 5
+          done
+          
+          if [[ "$STATUS" != "Success" ]]; then
+            echo "::error::SSM discovery command failed with status: $STATUS"
+            exit 1
+          fi
+
+          # Get output and save to file
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query "StandardOutputContent" --output text > discovery/$INSTANCE_ID.log
+
+      - name: Commit Discovery Log
+        run: |
+          BRANCH="${{ github.event.client_payload.branch }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add discovery/*.log
+          git commit -m "ci: Add package discovery log for ${{ github.event.client_payload.instance_id }}"
+          git pull --rebase origin "$BRANCH"
+          git push origin HEAD:"$BRANCH"
