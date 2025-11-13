@@ -1,0 +1,76 @@
+name: Run Ansible Patching Job via AWS SSM
+
+on:
+  repository_dispatch:
+    types: [run-ssm-patching-job]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Debug: Show Webhook Payload'
+        run: |
+          echo "Instance IDs: ${{ github.event.client_payload.instance_ids_json }}"
+          echo "Playbook Path: ${{ github.event.client_payload.playbook_path }}"
+
+      - name: Configure AWS Credentials for IAM Role
+        if: github.event.client_payload.aws_role_arn
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ github.event.client_payload.aws_role_arn }}
+          aws-region: ${{ github.event.client_payload.region }}
+
+      - name: Configure AWS Credentials for Access Keys
+        if: "!github.event.client_payload.aws_role_arn"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.client_payload.region }}
+
+      - name: Send SSM Run Command
+        id: ssm_command
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids ${{ github.event.client_payload.instance_ids }} \
+            --parameters '${{ github.event.client_payload.ssm_parameters }}' \
+            --query "Command.CommandId" \
+            --output text)
+          
+          if [ -z "$COMMAND_ID" ]; then
+            echo "::error::Failed to send SSM command."
+            exit 1
+          fi
+          
+          echo "SSM Command sent with ID: $COMMAND_ID"
+          echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
+
+      - name: Wait for SSM Command to Complete and Check Status
+        run: |
+          INSTANCE_IDS_JSON='${{ github.event.client_payload.instance_ids_json }}'
+          COMMAND_ID='${{ steps.ssm_command.outputs.command_id }}'
+          
+          # Wait up to 10 minutes for the command to start propagating
+          echo "Waiting for command to register..."
+          sleep 10 
+
+          for id in $(echo "$INSTANCE_IDS_JSON" | jq -r '.[]'); do
+            echo "Waiting for command to complete on instance $id..."
+            aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$id"
+            
+            echo "Checking final status for instance $id..."
+            STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$id" --query "Status" --output text)
+            if [ "$STATUS" != "Success" ]; then
+              echo "::error::SSM command failed on instance $id with status: $STATUS"
+              # Get output for debugging
+              aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$id"
+              exit 1
+            fi
+            echo "Instance $id completed successfully."
+          done
+          echo "All instances completed successfully."
