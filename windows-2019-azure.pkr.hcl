@@ -53,6 +53,7 @@ variable "iam_instance_profile" {
 
 
 source "azure-arm" "base" {
+  use_azure_cli_auth = true
   build_resource_group_name = var.managed_image_rg
   managed_image_name      = "windows-2019-${var.platform}-${var.build_id}"
   managed_image_resource_group_name = var.managed_image_rg
