@@ -72,7 +72,7 @@ build {
     inline = [
       "while ((Get-Service -Name \"wuauserv\").Status -ne 'Stopped') { Start-Sleep -s 5 }",
       "while ((Get-Service -Name \"TrustedInstaller\").Status -ne 'Stopped') { Start-Sleep -s 5 }",
-      "& $env:SystemRoot\System32\Sysprep\Sysprep.exe /generalize /oobe /shutdown /quiet"
+      "& $env:SystemRoot/System32/Sysprep/Sysprep.exe /generalize /oobe /shutdown /quiet"
     ]
   }
 }
