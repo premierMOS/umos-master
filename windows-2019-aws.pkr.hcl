@@ -68,11 +68,8 @@ source "amazon-ebs" "base" {
     owners      = ["801119661308"]
   }
   
-  communicator   = "winrm"
+  communicator   = "aws-ssm"
   winrm_username = "Administrator"
-  winrm_use_ssl  = true
-  winrm_insecure = true
-  winrm_interface = "session_manager"
 
 }
 
