@@ -72,10 +72,7 @@ source "amazon-ebs" "base" {
   winrm_username = "Administrator"
   winrm_use_ssl  = true
   winrm_insecure = true
-  
-  aws_agent {
-    proxy_interface = "ssm"
-  }
+  winrm_interface = "session_manager"
 
 }
 
