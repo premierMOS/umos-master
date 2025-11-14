@@ -46,8 +46,14 @@ variable "gcp_project_id" {
   default = ""
 }
 
+variable "iam_instance_profile" {
+  type    = string
+  default = ""
+}
+
 
 source "azure-arm" "base" {
+  build_resource_group_name = var.managed_image_rg
   managed_image_name      = "windows-2019-${var.platform}-${var.build_id}"
   managed_image_resource_group_name = var.managed_image_rg
   os_type         = "Windows"
