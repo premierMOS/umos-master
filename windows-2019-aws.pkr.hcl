@@ -57,7 +57,7 @@ source "amazon-ebs" "base" {
   instance_type   = var.vm_size
   region          = var.aws_region
   iam_instance_profile = var.iam_instance_profile
-  associate_public_ip_address = false
+  associate_public_ip_address = true
   source_ami_filter {
     filters = {
       name                = "Windows_Server-2019-English-Full-Base-*"
@@ -68,8 +68,11 @@ source "amazon-ebs" "base" {
     owners      = ["801119661308"]
   }
   
-  communicator   = "aws-ssm"
+  communicator   = "winrm"
   winrm_username = "Administrator"
+  winrm_use_ssl  = true
+  winrm_insecure = true
+  winrm_timeout  = "10m"
 
 }
 
