@@ -68,8 +68,9 @@ source "amazon-ebs" "base" {
     owners      = ["801119661308"]
   }
   
-  communicator = "ssm"
-  winrm_username = "Administrator"
+  communicator       = "winrm"
+  winrm_communicator = "ssm"
+  winrm_username     = "Administrator"
 
 }
 
