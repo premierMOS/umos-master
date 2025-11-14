@@ -46,11 +46,18 @@ variable "gcp_project_id" {
   default = ""
 }
 
+variable "iam_instance_profile" {
+  type    = string
+  default = ""
+}
+
 
 source "amazon-ebs" "base" {
   ami_name        = "windows-2019-${var.platform}-${var.build_id}"
   instance_type   = var.vm_size
   region          = var.aws_region
+  iam_instance_profile = var.iam_instance_profile
+  associate_public_ip_address = false
   source_ami_filter {
     filters = {
       name                = "Windows_Server-2019-English-Full-Base-*"
@@ -60,14 +67,10 @@ source "amazon-ebs" "base" {
     most_recent = true
     owners      = ["801119661308"]
   }
-  ssh_username = "Administrator"
   
-  communicator = "winrm"
-  winrm_use_ssl = true
-  winrm_insecure = true
-  winrm_timeout = "10m"
+  communicator = "ssm"
   winrm_username = "Administrator"
-  
+
 }
 
 build {
