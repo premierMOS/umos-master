@@ -48,7 +48,7 @@ variable "gcp_project_id" {
 
 
 source "azure-arm" "base" {
-  image_name      = "windows-2019-${var.platform}-${var.build_id}"
+  managed_image_name      = "windows-2019-${var.platform}-${var.build_id}"
   managed_image_resource_group_name = var.managed_image_rg
   os_type         = "Windows"
   source_image_reference {
