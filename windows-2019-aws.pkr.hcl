@@ -68,9 +68,14 @@ source "amazon-ebs" "base" {
     owners      = ["801119661308"]
   }
   
-  communicator       = "winrm"
-  winrm_communicator = "ssm"
-  winrm_username     = "Administrator"
+  communicator   = "winrm"
+  winrm_username = "Administrator"
+  winrm_use_ssl  = true
+  winrm_insecure = true
+  
+  aws_agent {
+    proxy_interface = "ssm"
+  }
 
 }
 
