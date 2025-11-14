@@ -114,5 +114,6 @@ jobs:
               -var "build_id=$BUILD_ID" \
               -var "platform=$PLATFORM" \
               -var "vm_size=${{ github.event.client_payload.vm_size }}" \
+              -var "iam_instance_profile=${{ github.event.client_payload.aws_iam_profile }}" \
               "$TEMPLATE_FILE"
           fi
