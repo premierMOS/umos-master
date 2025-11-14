@@ -51,12 +51,10 @@ source "azure-arm" "base" {
   managed_image_name      = "windows-2019-${var.platform}-${var.build_id}"
   managed_image_resource_group_name = var.managed_image_rg
   os_type         = "Windows"
-  source_image_reference = {
-    publisher = "MicrosoftWindowsServer"
-    offer     = "WindowsServer"
-    sku       = "2019-datacenter"
-    version   = "latest"
-  }
+  image_publisher = "MicrosoftWindowsServer"
+  image_offer     = "WindowsServer"
+  image_sku       = "2019-datacenter"
+  image_version   = "latest"
   vm_size         = var.vm_size
   
   communicator = "winrm"
