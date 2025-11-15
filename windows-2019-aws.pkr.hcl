@@ -82,17 +82,28 @@ source "amazon-ebs" "base" {
   
   user_data = <<-EOT
 <powershell>
-# Ensure the latest AWS SSM Agent is installed and running for reliable connectivity.
+# Install/Update SSM Agent to ensure reliable connectivity
 $installerUrl = "https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/windows_amd64/AmazonSSMAgentSetup.exe"
 $installerPath = "$env:TEMP\AmazonSSMAgentSetup.exe"
-Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
-Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
-Remove-Item $installerPath -Force
-# Restart the service to ensure the agent picks up the IAM role credentials
-Restart-Service AmazonSSMAgent
+try {
+    Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
+    Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
+    Remove-Item $installerPath -Force
+    Restart-Service AmazonSSMAgent
+} catch {
+    Write-Host "SSM Agent installation failed: $_"
+}
+
+# Configure WinRM for Packer, which will be proxied over SSM
+winrm quickconfig -q
+winrm set winrm/config/service '@{AllowUnencrypted="true"}'
+winrm set winrm/config/service/auth '@{Basic="true"}'
 </powershell>
 EOT
-  communicator   = "ssm"
+  communicator      = "winrm"
+  winrm_ssm_proxy   = true
+  winrm_username    = "Administrator"
+  winrm_timeout     = "20m"
 
 }
 
