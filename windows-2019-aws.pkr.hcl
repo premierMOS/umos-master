@@ -69,6 +69,12 @@ source "amazon-ebs" "base" {
   instance_type   = local.effective_vm_size
   region          = var.aws_region
   associate_public_ip_address = true
+  subnet_filter {
+    filters = {
+      "map-public-ip-on-launch" = "true"
+    }
+    random = true
+  }
   source_ami_filter {
     filters = {
       name                = "Windows_Server-2019-English-Full-Base-*"
@@ -91,6 +97,7 @@ netsh advfirewall firewall add rule name="WinRM-HTTPS" dir=in action=allow proto
 winrm set winrm/config/service '@{AllowUnencrypted="true"}'
 winrm set winrm/config/service/auth '@{Basic="true"}'
 # Signal Packer that setup is complete (optional but good practice)
+New-Item -Path C:\Temp -ItemType Directory -ErrorAction SilentlyContinue
 Set-Content -Path "C:\Temp\packer-ready.txt" -Value "ready"
 </powershell>
 EOT
