@@ -85,27 +85,21 @@ source "amazon-ebs" "base" {
     owners      = ["801119661308"]
   }
   
+  temporary_security_group_source_cidrs = ["0.0.0.0/0"]
   user_data = <<-EOT
 <powershell>
-# Generate a self-signed certificate for WinRM HTTPS
-$cert = New-SelfSignedCertificate -DnsName "packer" -CertStoreLocation "cert:\LocalMachine\My"
-# Create the WinRM HTTPS listener
-winrm create winrm/config/Listener?Address=*+Transport=HTTPS @{Hostname="packer"; CertificateThumbprint="$($cert.Thumbprint)"}
-# Open the firewall port for WinRM HTTPS
-netsh advfirewall firewall add rule name="WinRM-HTTPS" dir=in action=allow protocol=TCP localport=5986
-# Configure WinRM service for Packer
+Set-ExecutionPolicy Unrestricted -Force
+winrm quickconfig -q
 winrm set winrm/config/service '@{AllowUnencrypted="true"}'
 winrm set winrm/config/service/auth '@{Basic="true"}'
-# Signal Packer that setup is complete (optional but good practice)
-New-Item -Path C:\Temp -ItemType Directory -ErrorAction SilentlyContinue
-Set-Content -Path "C:\Temp\packer-ready.txt" -Value "ready"
+netsh advfirewall firewall add rule name="WinRM-HTTP" dir=in action=allow protocol=TCP localport=5985
 </powershell>
 EOT
   communicator   = "winrm"
-  winrm_use_ssl  = true
+  winrm_use_ssl  = false
   winrm_insecure = true
   winrm_username = "Administrator"
-  winrm_port     = 5986
+  winrm_port     = 5985
   winrm_timeout  = "20m"
 
 }
