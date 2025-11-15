@@ -81,11 +81,21 @@ source "amazon-ebs" "base" {
     owners      = ["801119661308"]
   }
   
+  user_data = <<-EOT
+<powershell>
+# Ensure WinRM service is running, configured for HTTPS, and firewall is open.
+# This is often necessary to resolve race conditions where the service isn't ready when Packer first tries to connect.
+Set-ExecutionPolicy Unrestricted -Force
+winrm quickconfig -q
+winrm set winrm/config/service/auth '@{Basic="true"}'
+netsh advfirewall firewall add rule name="WinRM-HTTPS" dir=in action=allow protocol=TCP localport=5986
+</powershell>
+EOT
   communicator   = "winrm"
   winrm_username = "Administrator"
   winrm_use_ssl  = true
   winrm_insecure = true
-  winrm_timeout  = "10m"
+  winrm_timeout  = "15m"
 
 }
 
