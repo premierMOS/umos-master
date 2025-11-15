@@ -82,15 +82,18 @@ source "amazon-ebs" "base" {
   
   user_data = <<-EOT
 <powershell>
-# Ensure the latest AWS SSM Agent is installed. This is required for Packer to connect.
-$Source = "https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/windows_amd64/AmazonSSMAgentSetup.exe"
-$File = "$env:temp\AmazonSSMAgentSetup.exe"
-Invoke-WebRequest -Uri $Source -OutFile $File
-Start-Process -FilePath $File -ArgumentList "/S" -Wait
-Remove-Item -Path $File -Force
+# Ensure the latest AWS SSM Agent is installed and running for reliable connectivity.
+$installerUrl = "https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/windows_amd64/AmazonSSMAgentSetup.exe"
+$installerPath = "$env:TEMP\AmazonSSMAgentSetup.exe"
+Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
+Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
+Remove-Item $installerPath -Force
+# Restart the service to ensure the agent picks up the IAM role credentials
+Restart-Service AmazonSSMAgent
 </powershell>
 EOT
   communicator   = "ssm"
+  ssm_interface  = "session_manager"
 
 }
 
