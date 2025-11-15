@@ -93,7 +93,6 @@ Restart-Service AmazonSSMAgent
 </powershell>
 EOT
   communicator   = "ssm"
-  ssm_interface  = "session_manager"
 
 }
 
