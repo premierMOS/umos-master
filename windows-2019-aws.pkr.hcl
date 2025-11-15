@@ -68,8 +68,7 @@ source "amazon-ebs" "base" {
   ami_name        = "windows-2019-${var.platform}-${var.build_id}"
   instance_type   = local.effective_vm_size
   region          = var.aws_region
-  # IAM instance profile is omitted for Windows builds to prevent potential issues.
-  # Packer will connect via WinRM, which does not require an instance profile.
+  iam_instance_profile = length(trimspace(var.iam_instance_profile)) > 0 ? trimspace(var.iam_instance_profile) : null
   associate_public_ip_address = true
   source_ami_filter {
     filters = {
@@ -83,19 +82,15 @@ source "amazon-ebs" "base" {
   
   user_data = <<-EOT
 <powershell>
-# Ensure WinRM service is running, configured for HTTPS, and firewall is open.
-# This is often necessary to resolve race conditions where the service isn't ready when Packer first tries to connect.
-Set-ExecutionPolicy Unrestricted -Force
-winrm quickconfig -q
-winrm set winrm/config/service/auth '@{Basic="true"}'
-netsh advfirewall firewall add rule name="WinRM-HTTPS" dir=in action=allow protocol=TCP localport=5986
+# Ensure the latest AWS SSM Agent is installed. This is required for Packer to connect.
+$Source = "https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/windows_amd64/AmazonSSMAgentSetup.exe"
+$File = "$env:temp\AmazonSSMAgentSetup.exe"
+Invoke-WebRequest -Uri $Source -OutFile $File
+Start-Process -FilePath $File -ArgumentList "/S" -Wait
+Remove-Item -Path $File -Force
 </powershell>
 EOT
-  communicator   = "winrm"
-  winrm_username = "Administrator"
-  winrm_use_ssl  = true
-  winrm_insecure = true
-  winrm_timeout  = "15m"
+  communicator   = "ssm"
 
 }
 
