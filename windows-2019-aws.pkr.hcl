@@ -82,28 +82,25 @@ source "amazon-ebs" "base" {
   
   user_data = <<-EOT
 <powershell>
-# Install/Update SSM Agent to ensure reliable connectivity
-$installerUrl = "https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/windows_amd64/AmazonSSMAgentSetup.exe"
-$installerPath = "$env:TEMP\AmazonSSMAgentSetup.exe"
-try {
-    Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
-    Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
-    Remove-Item $installerPath -Force
-    Restart-Service AmazonSSMAgent
-} catch {
-    Write-Host "SSM Agent installation failed: $_"
-}
-
-# Configure WinRM for Packer, which will be proxied over SSM
-winrm quickconfig -q
+# Generate a self-signed certificate for WinRM HTTPS
+$cert = New-SelfSignedCertificate -DnsName "packer" -CertStoreLocation "cert:\LocalMachine\My"
+# Create the WinRM HTTPS listener
+winrm create winrm/config/Listener?Address=*+Transport=HTTPS @{Hostname="packer"; CertificateThumbprint="$($cert.Thumbprint)"}
+# Open the firewall port for WinRM HTTPS
+netsh advfirewall firewall add rule name="WinRM-HTTPS" dir=in action=allow protocol=TCP localport=5986
+# Configure WinRM service for Packer
 winrm set winrm/config/service '@{AllowUnencrypted="true"}'
 winrm set winrm/config/service/auth '@{Basic="true"}'
+# Signal Packer that setup is complete (optional but good practice)
+Set-Content -Path "C:\Temp\packer-ready.txt" -Value "ready"
 </powershell>
 EOT
-  communicator      = "winrm"
-  winrm_ssm_proxy   = true
-  winrm_username    = "Administrator"
-  winrm_timeout     = "20m"
+  communicator   = "winrm"
+  winrm_use_ssl  = true
+  winrm_insecure = true
+  winrm_username = "Administrator"
+  winrm_port     = 5986
+  winrm_timeout  = "20m"
 
 }
 
