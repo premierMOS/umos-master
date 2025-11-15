@@ -87,4 +87,12 @@ source "azure-arm" "base" {
 build {
   sources = ["source.azure-arm.base"]
 
+
+  provisioner "powershell" {
+    inline = [
+      "Write-Host 'Running Sysprep to generalize the image for Azure...'",
+      "& $env:SystemRoot\System32\Sysprep\Sysprep.exe /oobe /generalize /shutdown /quiet"
+    ]
+  }
+
 }
