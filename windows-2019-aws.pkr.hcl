@@ -68,7 +68,6 @@ source "amazon-ebs" "base" {
   ami_name        = "windows-2019-${var.platform}-${var.build_id}"
   instance_type   = local.effective_vm_size
   region          = var.aws_region
-  iam_instance_profile = length(trimspace(var.iam_instance_profile)) > 0 ? trimspace(var.iam_instance_profile) : null
   associate_public_ip_address = true
   source_ami_filter {
     filters = {
