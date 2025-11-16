@@ -70,6 +70,7 @@ source "googlecompute" "base" {
   image_name      = "windows-2019-${var.platform}-${var.build_id}"
   zone            = "us-central1-a"
   machine_type    = local.effective_vm_size
+  disk_size       = 50
   ssh_username    = "packer"
   
   communicator = "winrm"
