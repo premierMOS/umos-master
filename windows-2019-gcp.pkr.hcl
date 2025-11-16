@@ -64,9 +64,6 @@ variable "iam_instance_profile" {
 }
 
 
-# This configuration explicitly uses the 'default' network. This helps Packer's
-# automatic firewall rule creation for WinRM to succeed, especially in CI/CD environments
-# where the network context may not be implicitly available.
 source "googlecompute" "base" {
   project_id      = var.gcp_project_id
   source_image_family = "windows-2019-core"
@@ -74,10 +71,17 @@ source "googlecompute" "base" {
   zone            = "us-central1-a"
   machine_type    = local.effective_vm_size
   disk_size       = 50
-  network         = "default"
-  
+  tags            = ["packer-windows-build"] # Tag for IAP firewall rule
+
   communicator = "winrm"
   winrm_username = "packer"
+  
+  # 🔑 Use IAP for a secure connection tunnel
+  use_iap        = true
+  
+  # Use SSL for WinRM over IAP
+  winrm_use_ssl  = true
+  winrm_insecure = true 
 }
 
 build {
