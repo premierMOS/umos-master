@@ -74,7 +74,6 @@ source "googlecompute" "base" {
   
   communicator = "winrm"
   winrm_username = "packer"
-  winrm_use_iap  = true
 }
 
 build {
