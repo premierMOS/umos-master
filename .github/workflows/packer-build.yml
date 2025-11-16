@@ -82,16 +82,6 @@ jobs:
         with:
           creds: '{"clientId":"${{ steps.parse_azure_creds.outputs.client_id }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ steps.parse_azure_creds.outputs.subscription_id }}","tenantId":"${{ steps.parse_azure_creds.outputs.tenant_id }}"}'
       
-      - name: Create GCP Firewall Rule for WinRM
-        if: github.event.client_payload.platform == 'gcp' && contains(github.event.client_payload.template_file, 'windows')
-        run: |
-          echo "Creating firewall rule to allow WinRM access for Packer..."
-          gcloud compute firewall-rules create packer-winrm-ingress \
-            --allow=tcp:5985,tcp:5986 \
-            --target-tags=packer-winrm \
-            --source-ranges=0.0.0.0/0 \
-            --project=${{ steps.gcp_auth.outputs.project_id }} || echo "Firewall rule 'packer-winrm-ingress' may already exist. Continuing..."
-
       - name: 'Build Packer Image'
         id: build
         run: |
@@ -128,11 +118,3 @@ jobs:
               -var "iam_instance_profile=${{ github.event.client_payload.aws_iam_profile }}" \
               "$TEMPLATE_FILE"
           fi
-          
-      - name: Delete GCP Firewall Rule for WinRM
-        if: always() && github.event.client_payload.platform == 'gcp' && contains(github.event.client_payload.template_file, 'windows')
-        run: |
-          echo "Deleting WinRM firewall rule..."
-          gcloud compute firewall-rules delete packer-winrm-ingress \
-            --project=${{ steps.gcp_auth.outputs.project_id }} \
-            --quiet || echo "Firewall rule not found, may have already been deleted."
