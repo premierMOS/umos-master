@@ -10,7 +10,7 @@ packer {
       source  = "github.com/hashicorp/azure"
     }
     googlecompute = {
-      version = ">= 1.0.0"
+      version = ">= 1.1.2"
       source  = "github.com/hashicorp/googlecompute"
     }
   }
@@ -74,10 +74,9 @@ source "googlecompute" "base" {
   ssh_username    = "packer"
   
   communicator = "winrm"
-  winrm_use_ssl = true
   winrm_insecure = true
   winrm_username = "packer"
-  winrm_use_iap = true
+  winrm_use_iap  = true
   
 }
 
