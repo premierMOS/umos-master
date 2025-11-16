@@ -39,6 +39,31 @@ jobs:
         with:
           credentials_json: ${{ steps.gcp_creds.outputs.gcp_credentials_json || github.event.client_payload.gcp_credentials_json }}
 
+      - name: '⚙️ Ensure IAP Prerequisites for WinRM'
+        if: github.event.client_payload.platform == 'gcp'
+        id: setup_iap_prereqs
+        run: |
+          echo "Setting up IAP Firewall Rule for WinRM..."
+          # 1. Create Firewall Rule for IAP Ingress on WinRM HTTPS port (5986)
+          gcloud compute firewall-rules create allow-iap-winrm-ingress \
+            --project=${{ steps.gcp_auth.outputs.project_id }} \
+            --direction=INGRESS \
+            --action=ALLOW \
+            --rules=tcp:5986 \
+            --source-ranges=35.235.240.0/20 \
+            --target-tags=packer-windows-build \
+            --quiet || echo "Firewall rule 'allow-iap-winrm-ingress' likely already exists."
+
+          echo "Granting IAP Tunnel User Role to the build Service Account..."
+          # 2. Get the authenticated Service Account email
+          SA_EMAIL=$(gcloud config get-value account)
+          echo "Service Account is: $SA_EMAIL"
+
+          # 3. Grant IAP Tunnel User role to the Service Account
+          gcloud projects add-iam-policy-binding ${{ steps.gcp_auth.outputs.project_id }} \
+            --member="serviceAccount:$SA_EMAIL" \
+            --role="roles/iap.tunnelResourceAccessor" || echo "IAM role binding for IAP Tunnel User likely already exists for $SA_EMAIL."
+
       - name: Configure AWS Credentials for IAM Role
         if: github.event.client_payload.platform == 'aws' && github.event.client_payload.aws_role_arn
         uses: aws-actions/configure-aws-credentials@v4
