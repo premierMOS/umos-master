@@ -71,13 +71,10 @@ source "googlecompute" "base" {
   zone            = "us-central1-a"
   machine_type    = local.effective_vm_size
   disk_size       = 50
-  ssh_username    = "packer"
-  
   communicator = "winrm"
   winrm_insecure = true
   winrm_username = "packer"
   winrm_use_iap  = true
-  
 }
 
 build {
