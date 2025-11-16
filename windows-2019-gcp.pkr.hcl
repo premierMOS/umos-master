@@ -64,10 +64,9 @@ variable "iam_instance_profile" {
 }
 
 
-# NOTE: This builder tags the temporary instance with "packer-winrm".
-# You MUST have a firewall rule in your GCP project that allows TCP ingress
-# on port 5985 from the Packer build environment to instances with this tag.
-# For GitHub Actions, a source range of "0.0.0.0/0" is often required.
+# This configuration explicitly uses the 'default' network. This helps Packer's
+# automatic firewall rule creation for WinRM to succeed, especially in CI/CD environments
+# where the network context may not be implicitly available.
 source "googlecompute" "base" {
   project_id      = var.gcp_project_id
   source_image_family = "windows-2019-core"
@@ -75,7 +74,7 @@ source "googlecompute" "base" {
   zone            = "us-central1-a"
   machine_type    = local.effective_vm_size
   disk_size       = 50
-  network_tags    = ["packer-winrm"]
+  network         = "default"
   
   communicator = "winrm"
   winrm_username = "packer"
