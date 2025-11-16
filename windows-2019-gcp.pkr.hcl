@@ -73,6 +73,7 @@ source "googlecompute" "base" {
   disk_size       = 50
   ssh_username    = "packer"
   
+  tags = ["packer-winrm"]
   communicator = "winrm"
   winrm_use_ssl = true
   winrm_insecure = true
